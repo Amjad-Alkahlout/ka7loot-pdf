@@ -10,6 +10,7 @@ class ToolUsage extends Model
     protected $table = 'tool_usage';
 
     protected $fillable = [
+        'file_job_id',
         'tool_type',
         'ip_hash',
         'is_successful',
@@ -34,15 +35,18 @@ class ToolUsage extends Model
         });
     }
 
-    public static function log(string $toolType, string $ip, bool $successful, int $bytes, int $durationMs): self
+    public static function log(string $toolType, string $ip, bool $successful, int $bytes, int $durationMs, ?string $fileJobId = null): self
     {
-        return self::create([
-            'tool_type' => $toolType,
-            'ip_hash' => hash('sha256', $ip . config('app.key')),
-            'is_successful' => $successful,
-            'bytes_processed' => $bytes,
-            'duration_ms' => $durationMs,
-            'created_at' => now(),
-        ]);
+        return self::updateOrCreate(
+            ['file_job_id' => $fileJobId],
+            [
+                'tool_type' => $toolType,
+                'ip_hash' => hash('sha256', $ip . config('app.key')),
+                'is_successful' => $successful,
+                'bytes_processed' => $bytes,
+                'duration_ms' => $durationMs,
+                'created_at' => now(),
+            ]
+        );
     }
 }
