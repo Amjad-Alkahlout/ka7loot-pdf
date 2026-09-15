@@ -12,6 +12,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Trust loopback and private Docker container subnets (Host Nginx -> Docker web -> app)
+        // Avoids trusting arbitrary external proxy headers from untrusted clients
+        $middleware->trustProxies(
+            at: explode(',', env('TRUSTED_PROXIES', '127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16'))
+        );
+
         $middleware->web(append: [
             SetLocaleMiddleware::class,
         ]);

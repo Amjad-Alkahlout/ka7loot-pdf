@@ -1,6 +1,10 @@
-# DocuMorph - Production-Grade PDF & Image Processing Platform
+# Ka7loot PDF - Production-Grade PDF & Image Processing Platform
 
-DocuMorph is a modern, privacy-focused online utility platform built with **Laravel 13**, **PHP 8.5.5**, **MySQL 8.4**, **Livewire 3**, **Vite 7**, and **Tailwind CSS 4**.
+**Ka7loot PDF** is a modern, privacy-focused online utility platform built with **Laravel 13**, **PHP 8.5.5**, **MySQL 8.4**, **Livewire 3**, **Vite 7**, and **Tailwind CSS 4**.
+
+Created & maintained by **Amjad Alkahloot** (Software Developer)  
+GitHub: [https://github.com/Amjad-Alkahlout](https://github.com/Amjad-Alkahlout)  
+Contact: [akahloot2005@gmail.com](mailto:akahloot2005@gmail.com)
 
 ---
 
@@ -104,8 +108,8 @@ Run the development servers concurrently:
 # Terminal 1: Laravel Server
 php artisan serve
 
-# Terminal 2: Queue Worker
-php artisan queue:listen --queue=file-processing,default
+# Terminal 2: Queue Worker (listens on default queue)
+php artisan queue:work
 
 # Terminal 3: Asset Dev Server (if modifying styles)
 npm run dev
@@ -130,7 +134,7 @@ Run the full platform test suite:
 ```bash
 php artisan test
 ```
-All **43 tests (131 assertions)** cover:
+All tests cover:
 - Unit file sanitization and security path traversal validation
 - FileStorageManager ephemeral isolation
 - Intervention Image v3 GD processing (compress, resize, convert, archive)

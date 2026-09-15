@@ -14,6 +14,12 @@ enum ToolType: string
     case RESIZE_IMAGE = 'resize-image';
     case CONVERT_IMAGE = 'convert-image';
     case ORGANIZE_PDF = 'organize-pdf';
+    case PROTECT_PDF = 'protect-pdf';
+    case UNLOCK_PDF = 'unlock-pdf';
+    case SIGN_PDF = 'sign-pdf';
+    case EDIT_PDF = 'edit-pdf';
+    case REMOVE_BACKGROUND = 'remove-background';
+    case CHANGE_BACKGROUND = 'change-background';
 
     public function isHeavy(): bool
     {
@@ -36,6 +42,12 @@ enum ToolType: string
             self::RESIZE_IMAGE => 'Resize Image',
             self::CONVERT_IMAGE => 'Convert Image',
             self::ORGANIZE_PDF => 'Organize PDF',
+            self::PROTECT_PDF => 'Protect PDF',
+            self::UNLOCK_PDF => 'Unlock PDF',
+            self::SIGN_PDF => 'Sign PDF',
+            self::EDIT_PDF => 'Edit PDF',
+            self::REMOVE_BACKGROUND => 'Remove Background',
+            self::CHANGE_BACKGROUND => 'Change Background',
         };
     }
 }

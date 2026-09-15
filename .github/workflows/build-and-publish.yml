@@ -1,0 +1,99 @@
+name: Build and Publish Production Images
+
+on:
+  # Publishing is disabled on push until officially ready
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   branches: [ main, master ]
+  #   types:
+  #     - completed
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  publish:
+    name: Build & Push Production Images to GHCR
+    runs-on: ubuntu-24.04
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Extract metadata and tags for the Application Container (PHP 8.5-FPM + Node + Tools)
+      - name: Extract Metadata for App Image
+        id: meta-app
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/app
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'master' }}
+            type=ref,event=tag
+
+      # Build and push the Application Image
+      - name: Build and Push App Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.meta-app.outputs.tags }}
+          labels: ${{ steps.meta-app.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Extract metadata and tags for the Internal Nginx Proxy Container
+      - name: Extract Metadata for Web Image
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/web
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'master' }}
+            type=ref,event=tag
+
+      # Build and push the Web Image
+      - name: Build and Push Web Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: web
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary of Published Images
+        run: |
+          COMMIT_REF="${{ github.event.workflow_run.head_sha || github.sha }}"
+          SHORT_SHA="${COMMIT_REF:0:7}"
+          echo "### Production Docker Images Published to GHCR" >> $GITHUB_STEP_SUMMARY
+          echo "- **App Image:** \`${{ env.REGISTRY }}/${{ github.repository }}/app:sha-${SHORT_SHA}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Web Image:** \`${{ env.REGISTRY }}/${{ github.repository }}/web:sha-${SHORT_SHA}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Latest App Tag:** \`${{ env.REGISTRY }}/${{ github.repository }}/app:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Latest Web Tag:** \`${{ env.REGISTRY }}/${{ github.repository }}/web:latest\`" >> $GITHUB_STEP_SUMMARY

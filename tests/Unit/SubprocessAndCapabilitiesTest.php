@@ -140,4 +140,39 @@ class SubprocessAndCapabilitiesTest extends TestCase
         $executor = new SubprocessExecutorService();
         $executor->execute(['nonexistent_binary_xyz_123', '--help']);
     }
+
+    public function test_live_ghostscript_and_poppler_execution_when_installed(): void
+    {
+        $detector = app(SystemBinaryDetector::class);
+        $detector->probe(forceRefresh: true);
+
+        if ($detector->hasGhostscript()) {
+            $service = app(PdfCompressionService::class);
+            $source = $this->createSamplePdf('live_input.pdf');
+            $output = $this->testDir . DIRECTORY_SEPARATOR . 'live_compressed.pdf';
+
+            $result = $service->compress($source, $output, CompressionLevel::RECOMMENDED);
+
+            $this->assertFileExists($output);
+            $this->assertEquals('ghostscript', $result['engine']);
+            $this->assertTrue($result['is_deep']);
+            $this->assertEquals('Deep compression (Ghostscript)', $result['engine_label']);
+        }
+
+        if ($detector->hasPoppler()) {
+            $pdfToImage = app(PdfToImageService::class);
+            $source = $this->createSamplePdf('live_raster.pdf');
+            $outDir = $this->testDir . DIRECTORY_SEPARATOR . 'live_raster_out';
+
+            $jpgImages = $pdfToImage->convertPdfToImages($source, $outDir, 'jpg', 150);
+            $this->assertNotEmpty($jpgImages);
+            $this->assertFileExists($jpgImages[0]['path']);
+            $this->assertEquals('image/jpeg', $jpgImages[0]['mime_type']);
+
+            $pngImages = $pdfToImage->convertPdfToImages($source, $outDir, 'png', 150);
+            $this->assertNotEmpty($pngImages);
+            $this->assertFileExists($pngImages[0]['path']);
+            $this->assertEquals('image/png', $pngImages[0]['mime_type']);
+        }
+    }
 }

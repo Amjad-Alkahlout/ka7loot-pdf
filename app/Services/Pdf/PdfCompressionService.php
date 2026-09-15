@@ -27,6 +27,7 @@ class PdfCompressionService
      *     processed_size: int,
      *     saved_bytes: int,
      *     savings_percent: float,
+     *     duration_ms: int,
      *     engine: string,
      *     engine_label: string,
      *     is_deep: bool,
@@ -52,7 +53,7 @@ class PdfCompressionService
     }
 
     /**
-     * Deep compression via Ghostscript.
+     * Deep compression via Ghostscript with distinct preset parameter sets.
      */
     protected function compressWithGhostscript(
         string $sourcePath,
@@ -60,19 +61,56 @@ class PdfCompressionService
         CompressionLevel $level,
         int $originalSize
     ): array {
+        $startTime = microtime(true);
         $gsBinary = $this->detector->getGhostscriptPath();
 
-        $cmd = [
+        // Specific, differentiated Ghostscript parameters per preset
+        $presetFlags = match ($level) {
+            CompressionLevel::LOW => [
+                '-dPDFSETTINGS=/printer',
+                '-dColorImageResolution=300',
+                '-dGrayImageResolution=300',
+                '-dMonoImageResolution=600',
+                '-dDownsampleColorImages=true',
+                '-dDownsampleGrayImages=true',
+                '-dColorImageDownsampleType=/Bicubic',
+            ],
+            CompressionLevel::EXTREME => [
+                '-dPDFSETTINGS=/screen',
+                '-dColorImageResolution=72',
+                '-dGrayImageResolution=72',
+                '-dMonoImageResolution=150',
+                '-dDownsampleColorImages=true',
+                '-dDownsampleGrayImages=true',
+                '-dDownsampleMonoImages=true',
+                '-dColorImageDownsampleType=/Bicubic',
+                '-dConvertCMYKImagesToRGB=true',
+            ],
+            default => [ // RECOMMENDED
+                '-dPDFSETTINGS=/ebook',
+                '-dColorImageResolution=150',
+                '-dGrayImageResolution=150',
+                '-dMonoImageResolution=300',
+                '-dDownsampleColorImages=true',
+                '-dDownsampleGrayImages=true',
+                '-dDownsampleMonoImages=true',
+                '-dColorImageDownsampleType=/Bicubic',
+            ],
+        };
+
+        $cmd = array_merge([
             $gsBinary,
             '-sDEVICE=pdfwrite',
             '-dCompatibilityLevel=1.4',
-            '-dPDFSETTINGS=' . $level->gsSetting(),
             '-dNOPAUSE',
             '-dQUIET',
             '-dBATCH',
+            '-dDetectDuplicateImages=true',
+            '-dCompressFonts=true',
+            '-dSubsetFonts=true',
+            '-dAutoRotatePages=/None',
             '-sOutputFile=' . $outputPath,
-            $sourcePath,
-        ];
+        ], $presetFlags, [$sourcePath]);
 
         try {
             $this->executor->execute($cmd);
@@ -80,12 +118,16 @@ class PdfCompressionService
             throw new RuntimeException("Ghostscript deep compression failed: {$e->getMessage()}", 0, $e);
         }
 
+        $durationMs = (int) round((microtime(true) - $startTime) * 1000);
         $processedSize = (int) filesize($outputPath);
+        $notice = null;
 
-        // If compressed file is larger than original, copy original to preserve minimal size
+        // If compressed file is larger than or equal to original (e.g. text only or pre-compressed),
+        // revert to original and explain honestly rather than claiming savings
         if ($processedSize >= $originalSize) {
             copy($sourcePath, $outputPath);
             $processedSize = $originalSize;
+            $notice = 'The PDF document was already highly compressed. Original file preserved to prevent size inflation.';
         }
 
         $savedBytes = max(0, $originalSize - $processedSize);
@@ -99,10 +141,11 @@ class PdfCompressionService
             'processed_size'  => $processedSize,
             'saved_bytes'     => $savedBytes,
             'savings_percent' => max(0.0, $savingsPercent),
+            'duration_ms'     => $durationMs,
             'engine'          => 'ghostscript',
             'engine_label'    => 'Deep compression (Ghostscript)',
             'is_deep'         => true,
-            'notice'          => null,
+            'notice'          => $notice,
         ];
     }
 
@@ -114,6 +157,7 @@ class PdfCompressionService
         string $outputPath,
         int $originalSize
     ): array {
+        $startTime = microtime(true);
         try {
             $pdf = new RotatableFpdi();
             $pageCount = $pdf->setSourceFile($sourcePath);
@@ -131,7 +175,9 @@ class PdfCompressionService
             throw new RuntimeException("Pure PHP PDF optimization fallback failed: {$e->getMessage()}", 0, $e);
         }
 
+        $durationMs = (int) round((microtime(true) - $startTime) * 1000);
         $processedSize = (int) filesize($outputPath);
+        $notice = 'Ghostscript is required for deep compression and significant file size reduction.';
 
         // Preserve smaller file if repack increased size
         if ($processedSize >= $originalSize) {
@@ -150,10 +196,11 @@ class PdfCompressionService
             'processed_size'  => $processedSize,
             'saved_bytes'     => $savedBytes,
             'savings_percent' => max(0.0, $savingsPercent),
+            'duration_ms'     => $durationMs,
             'engine'          => 'pure_php',
             'engine_label'    => 'Limited optimization (Pure PHP)',
             'is_deep'         => false,
-            'notice'          => 'Ghostscript is required for deep compression and significant file size reduction.',
+            'notice'          => $notice,
         ];
     }
 }

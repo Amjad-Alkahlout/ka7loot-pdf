@@ -14,16 +14,35 @@ class CompressImageComponent extends BaseToolComponent
 {
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $upload = null;
+
+    public string $compressionMethod = 'preset'; // 'preset' | 'target'
     public string $level = 'recommended';
+
+    public ?string $targetValue = null;
+    public string $targetUnit = 'kb'; // 'kb' | 'mb'
+    public string $targetPriority = 'balanced'; // 'max_quality' | 'balanced' | 'smallest'
 
     public function updatedUpload(): void
     {
+        $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
+
         $this->validate([
-            'upload' => 'required|file|max:25600',
+            'upload' => "required|file|max:{$maxImageKb}",
         ]);
 
         if ($this->upload) {
-            $this->jobStatus = 'ready';
+            $this->jobStatus = 'uploaded';
+
+            if (empty($this->targetValue)) {
+                $sizeKb = $this->upload->getSize() / 1024;
+                if ($sizeKb > 1024) {
+                    $this->targetUnit = 'mb';
+                    $this->targetValue = (string) round(($sizeKb / 1024) * 0.5, 1);
+                } else {
+                    $this->targetUnit = 'kb';
+                    $this->targetValue = (string) max(20, (int) round($sizeKb * 0.5));
+                }
+            }
         }
     }
 
@@ -32,10 +51,54 @@ class CompressImageComponent extends BaseToolComponent
         FileStorageManager $storage,
         DispatchFileJobAction $dispatcher
     ): void {
+        $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
+
         $this->validate([
-            'upload' => 'required|file',
-            'level' => 'required|in:low,recommended,extreme',
+            'upload'            => "required|file|max:{$maxImageKb}",
+            'compressionMethod' => 'required|in:preset,target',
         ]);
+
+        $targetBytes = null;
+
+        if ($this->compressionMethod === 'preset') {
+            $this->validate([
+                'level' => 'required|in:low,recommended,extreme',
+            ]);
+        } else {
+            if (!is_numeric($this->targetValue) || (float) $this->targetValue <= 0) {
+                $this->addError('targetValue', __('tools.validation_target_positive'));
+                return;
+            }
+
+            $this->validate([
+                'targetUnit'     => 'required|in:kb,mb',
+                'targetPriority' => 'required|in:max_quality,balanced,smallest',
+            ]);
+
+            $val = (float) $this->targetValue;
+            $targetBytes = ($this->targetUnit === 'mb')
+                ? (int) round($val * 1024 * 1024)
+                : (int) round($val * 1024);
+
+            $minKb = config('fileprocessor.target_compression.min_target_kb', 10);
+            $maxMb = config('fileprocessor.target_compression.max_target_mb', 50);
+
+            if ($targetBytes < $minKb * 1024) {
+                $this->addError('targetValue', __('tools.validation_target_min', ['min' => $minKb]));
+                return;
+            }
+
+            if ($targetBytes > $maxMb * 1024 * 1024) {
+                $this->addError('targetValue', __('tools.validation_target_max', ['max' => $maxMb]));
+                return;
+            }
+
+            $originalBytes = $this->upload->getSize();
+            if ($targetBytes >= $originalBytes) {
+                $this->addError('targetValue', __('tools.validation_target_already_smaller'));
+                return;
+            }
+        }
 
         $this->jobStatus = 'processing';
         $this->statusMessage = __('ui.status_processing');
@@ -53,10 +116,15 @@ class CompressImageComponent extends BaseToolComponent
                 'status'         => JobStatus::PENDING,
                 'download_token' => Str::random(48),
                 'input_metadata' => [
-                    'file'              => $sanitized['safe_filename'],
-                    'clean_name'        => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
-                    'compression_level' => $this->level,
-                    'ip'                => request()->ip(),
+                    'file'               => $sanitized['safe_filename'],
+                    'clean_name'         => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
+                    'compression_method' => $this->compressionMethod,
+                    'compression_level'  => $this->level,
+                    'target_size_bytes'  => $targetBytes,
+                    'target_value'       => $this->targetValue,
+                    'target_unit'        => $this->targetUnit,
+                    'target_priority'    => $this->targetPriority,
+                    'ip'                 => request()->ip(),
                 ],
                 'expires_at'     => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
             ]);

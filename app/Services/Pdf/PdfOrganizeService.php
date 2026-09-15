@@ -49,8 +49,9 @@ class PdfOrganizeService
                 $pdf->useTemplate($templateId);
                 $pageCounter++;
 
-                if ($rotation % 360 !== 0) {
-                    $pdf->setPageRotation($rotation, $pageCounter);
+                $normalizedRotation = (($rotation % 360) + 360) % 360;
+                if ($normalizedRotation !== 0) {
+                    $pdf->setPageRotation($normalizedRotation, $pageCounter);
                 }
             }
 

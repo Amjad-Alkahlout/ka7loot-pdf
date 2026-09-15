@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Enums\JobStatus;
 use App\Models\FileJob;
+use App\Models\TemporaryShare;
 use App\Models\ToolUsage;
 use App\Services\File\FileStorageManager;
 use Illuminate\Console\Command;
@@ -20,6 +21,7 @@ class CleanupExpiredCommand extends Command
 
         $deletedJobsCount = 0;
         $deletedUsageCount = 0;
+        $deletedSharesCount = 0;
 
         // 1. Process expired FileJobs from database
         $expiredJobs = FileJob::where('expires_at', '<', now())
@@ -61,12 +63,22 @@ class CleanupExpiredCommand extends Command
             }
         }
 
-        // 3. Purge historical usage analytics older than configured days
+        // 3. Invalidate or clean expired / revoked temporary shares
+        try {
+            $deletedSharesCount = TemporaryShare::where('expires_at', '<', now())
+                ->orWhereNotNull('revoked_at')
+                ->orWhereDoesntHave('fileJob')
+                ->delete();
+        } catch (\Throwable $e) {
+            Log::warning("Failed to purge expired temporary shares: {$e->getMessage()}");
+        }
+
+        // 4. Purge historical usage analytics older than configured days
         $retentionDays = config('fileprocessor.retention.analytics_retention_days', 90);
         $analyticsCutoff = now()->subDays($retentionDays);
         $deletedUsageCount = ToolUsage::where('created_at', '<', $analyticsCutoff)->delete();
 
-        $this->info("Cleanup completed: {$deletedJobsCount} expired/orphan job directories cleaned, {$deletedUsageCount} old analytics records purged.");
+        $this->info("Cleanup completed: {$deletedJobsCount} expired/orphan job directories cleaned, {$deletedSharesCount} temporary shares purged, {$deletedUsageCount} old analytics records purged.");
 
         return Command::SUCCESS;
     }

@@ -1,4 +1,7 @@
 *
 !private/
 !public/
+!models/
+!models/**
 !.gitignore
+

@@ -1,0 +1,21 @@
+{
+  "model_name": "MODNet Photographic Portrait Matting",
+  "source_repository": "https://huggingface.co/Xenova/modnet",
+  "upstream_repository": "https://github.com/ZHKKKe/MODNet",
+  "license": "Apache-2.0",
+  "license_url": "https://www.apache.org/licenses/LICENSE-2.0",
+  "sha256": "07C308CF0FC7E6E8B2065A12ED7FC07E1DE8FEBB7DC7839D7B7F15DD66584DF9",
+  "file_size_bytes": 25888640,
+  "format": "ONNX",
+  "execution_provider": "CPUExecutionProvider",
+  "authors": [
+    "Zhanghan Ke",
+    "Jiakun Li",
+    "Zhaoyang Rao",
+    "Quanling Zheng",
+    "Jianmin Bao",
+    "Qianxiao Li"
+  ],
+  "citation": "MODNet: Real-Time Trimap-Free Portrait Matting via Objective Decomposition (AAAI 2022)",
+  "verified_at": "2026-09-14T09:40:00Z"
+}

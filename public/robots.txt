@@ -1,2 +1,8 @@
 User-agent: *
-Disallow:
+Disallow: /download/
+Disallow: /s/
+Disallow: /job/
+Disallow: /share/
+Allow: /
+
+Sitemap: /sitemap.xml

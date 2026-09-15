@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE & Editor
+.idea
+.vscode
+.editorconfig
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules
+vendor
+
+# Testing & Cache
+tests
+phpunit.xml
+.phpunit.result.cache
+
+# Logs & Ephemeral Storage
+storage/logs/*
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+storage/app/private/secure_temp/*
+storage/app/public/*
+storage/ml_prototype
+storage/pdfium_prototype
+
+# Windows & Platform Specifics
+bin/pdfium/win-x64
+*.bat
+*.ps1
+*.exe
+*.dll
+
+# Build Artifacts
+npm-debug.log
+yarn-error.log

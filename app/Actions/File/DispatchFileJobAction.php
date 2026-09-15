@@ -29,7 +29,7 @@ class DispatchFileJobAction
         $shouldQueue = $isHeavyTool || $isLargeFile || $hasManyPages;
 
         if ($shouldQueue) {
-            $queueName = config('fileprocessor.queues.default_queue', 'file-processing');
+            $queueName = config('fileprocessor.queues.default_queue', 'default');
             ProcessFileJob::dispatch($job->id)->onQueue($queueName);
             return false;
         }

@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Run Test Suite & Build Verification
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.5
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: gd, pdo_sqlite, sqlite3, pdo_mysql, zip, intl, exif, bcmath, fileinfo, opcache
+          coverage: none
+          tools: composer:v2
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install System Binaries (Ghostscript & Poppler)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ghostscript poppler-utils
+
+      - name: Cache Composer Dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install Composer Dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      - name: Compile Frontend Assets (Vite)
+        run: npm run build
+
+      - name: Setup Application Key & Environment
+        run: |
+          cp .env.example .env.testing
+          php artisan key:generate --env=testing
+
+      - name: Run PHPUnit Test Suite
+        run: php vendor/bin/phpunit --colors=always
+
+      - name: Run JavaScript Unit Tests
+        run: |
+          node tests/Javascript/edit-pdf-preview.test.js
+          node tests/Javascript/upload-progress-validation.test.js
+
+      - name: Validate Docker Compose Configuration
+        run: docker compose config

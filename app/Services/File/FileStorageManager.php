@@ -117,6 +117,35 @@ class FileStorageManager
     }
 
     /**
+     * Get or create a dedicated temporary directory for subprocesses (e.g. Ghostscript).
+     * If a jobId is provided, returns a 'tmp' subfolder inside the job directory.
+     * Otherwise, returns a secure 'proc_tmp' folder inside the secure temp root.
+     */
+    public function getSubprocessTempDirectory(?string $jobId = null): string
+    {
+        if ($jobId !== null) {
+            $jobDir = $this->getJobDirectory($jobId);
+            $subTemp = $jobDir . DIRECTORY_SEPARATOR . 'tmp';
+            if (!is_dir($subTemp)) {
+                @mkdir($subTemp, 0755, true);
+            }
+            return $subTemp;
+        }
+
+        $root = $this->getRootPath();
+        if (!is_dir($root)) {
+            Storage::disk($this->disk)->makeDirectory($this->baseTempPath);
+        }
+
+        $procTemp = $root . DIRECTORY_SEPARATOR . 'proc_tmp';
+        if (!is_dir($procTemp)) {
+            @mkdir($procTemp, 0755, true);
+        }
+
+        return $procTemp;
+    }
+
+    /**
      * Completely clean up and remove a job's temporary directory.
      */
     public function deleteJobDirectory(string $jobId): bool

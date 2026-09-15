@@ -17,7 +17,23 @@ class RotatableFpdi extends Fpdi
         $targetPage = $page ?? $this->page;
         if ($targetPage > 0) {
             $normalizedAngle = (($angle % 360) + 360) % 360;
-            $this->PageInfo[$targetPage]['rotation'] = $normalizedAngle;
+            if ($normalizedAngle === 0) {
+                unset($this->PageInfo[$targetPage]['rotation']);
+            } else {
+                $this->PageInfo[$targetPage]['rotation'] = $normalizedAngle;
+            }
         }
+    }
+
+    /**
+     * Get the rotation angle for a specific page.
+     *
+     * @param int|null $page
+     * @return int
+     */
+    public function getPageRotation(?int $page = null): int
+    {
+        $targetPage = $page ?? $this->page;
+        return $this->PageInfo[$targetPage]['rotation'] ?? 0;
     }
 }

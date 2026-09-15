@@ -17,12 +17,14 @@ class MergePdfComponent extends BaseToolComponent
 
     public function updatedUploads(): void
     {
+        $maxPdfKb = config('fileprocessor.limits.max_pdf_size_kb', 51200);
+
         $this->validate([
-            'uploads.*' => 'required|file|max:51200', // 50MB
+            'uploads.*' => "required|file|max:{$maxPdfKb}",
         ]);
 
         if (!empty($this->uploads)) {
-            $this->jobStatus = 'ready';
+            $this->jobStatus = 'uploaded';
         }
     }
 
@@ -41,11 +43,11 @@ class MergePdfComponent extends BaseToolComponent
         FileStorageManager $storage,
         DispatchFileJobAction $dispatcher
     ): void {
+        $maxPdfKb = config('fileprocessor.limits.max_pdf_size_kb', 51200);
+
         $this->validate([
-            'uploads' => 'required|array|min:2',
-            'uploads.*' => 'required|file',
-        ], [
-            'uploads.min' => 'Please select at least 2 PDF files to merge.',
+            'uploads'   => 'required|array|min:2',
+            'uploads.*' => "required|file|max:{$maxPdfKb}",
         ]);
 
         $this->jobStatus = 'processing';

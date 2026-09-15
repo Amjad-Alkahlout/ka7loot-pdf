@@ -42,4 +42,9 @@ class ProcessedFile extends Model
 
         return round((($this->original_size_bytes - $this->processed_size_bytes) / $this->original_size_bytes) * 100, 1);
     }
+
+    public function savingsPercent(): float
+    {
+        return $this->savings_percentage;
+    }
 }

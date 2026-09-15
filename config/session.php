@@ -9,12 +9,12 @@ return [
     | Default Session Driver
     |--------------------------------------------------------------------------
     |
-    | This option determines the default session driver that is utilized for
+    | This option determines the default session driver that will be used for
     | incoming requests. Laravel supports a variety of storage options to
     | persist session data. Database storage is a great default choice.
     |
-    | Supported: "file", "cookie", "database", "memcached",
-    |            "redis", "dynamodb", "array"
+    | Supported: "file", "cookie", "database", "apc",
+    |            "memcached", "redis", "dynamodb", "array"
     |
     */
 
@@ -27,8 +27,7 @@ return [
     |
     | Here you may specify the number of minutes that you wish the session
     | to be allowed to remain idle before it expires. If you want them
-    | to expire immediately when the browser is closed then you may
-    | indicate that via the expire_on_close configuration option.
+    | to expire immediately when the browser is closed then set it to 0.
     |
     */
 
@@ -42,8 +41,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | This option allows you to easily specify that all of your session data
-    | should be encrypted before it's stored. All encryption is performed
-    | automatically by Laravel and you may use the session like normal.
+    | should be encrypted before it's stored. All encryption will run via
+    | the standard Laravel encryption facilities and may be configured.
     |
     */
 
@@ -54,9 +53,9 @@ return [
     | Session File Location
     |--------------------------------------------------------------------------
     |
-    | When utilizing the "file" session driver, the session files are placed
-    | on disk. The default storage location is defined here; however, you
-    | are free to provide another location where they should be stored.
+    | When utilizing the "file" session driver, the session files will be
+    | stored on disk. The default storage path is defined here; however,
+    | you are free to provide another location that should be used.
     |
     */
 
@@ -82,7 +81,7 @@ return [
     |
     | When using the "database" session driver, you may specify the table to
     | be used to store sessions. Of course, a sensible default is defined
-    | for you; however, you're welcome to change this to another table.
+    | for you; however, you are free to change this to another table.
     |
     */
 
@@ -97,7 +96,7 @@ return [
     | define the cache store which should be used to store the session data
     | between requests. This must match one of your defined cache stores.
     |
-    | Affects: "dynamodb", "memcached", "redis"
+    | Affects: "apc", "dynamodb", "memcached", "redis"
     |
     */
 
@@ -169,7 +168,7 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    'secure' => env('SESSION_SECURE_COOKIE', env('APP_ENV') === 'production'),
 
     /*
     |--------------------------------------------------------------------------
@@ -208,26 +207,12 @@ return [
     |
     | Setting this value to true will tie the cookie to the top-level site for
     | a cross-site context. Partitioned cookies are accepted by the browser
-    | when flagged "secure" and the Same-Site attribute is set to "none".
+    | when flagged "secure" and the Recommended Action is followed.
+    |
+    | See: https://developer.mozilla.org/en-US/docs/Web/Privacy/Privacy_sandbox/Partitioned_cookies
     |
     */
 
     'partitioned' => env('SESSION_PARTITIONED_COOKIE', false),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Session Serialization
-    |--------------------------------------------------------------------------
-    |
-    | This value controls the serialization strategy for session data, which
-    | is JSON by default. Setting this to "php" allows the storage of PHP
-    | objects in the session but can make an application vulnerable to
-    | "gadget chain" serialization attacks if the APP_KEY is leaked.
-    |
-    | Supported: "json", "php"
-    |
-    */
-
-    'serialization' => 'json',
 
 ];

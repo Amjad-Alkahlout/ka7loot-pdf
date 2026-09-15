@@ -13,15 +13,20 @@ use App\Models\ProcessedFile;
 use App\Models\ToolUsage;
 use App\Services\File\ArchiveGeneratorService;
 use App\Services\File\FileStorageManager;
+use App\Services\Image\ImageBackgroundService;
 use App\Services\Image\ImageCompressionService;
 use App\Services\Image\ImageConversionService;
 use App\Services\Image\ImageResizeService;
+use App\Services\Image\ImageTargetSizeCompressionService;
 use App\Services\Pdf\JpgToPdfService;
 use App\Services\Pdf\PdfCompressionService;
 use App\Services\Pdf\PdfMergeService;
 use App\Services\Pdf\PdfOrganizeService;
+use App\Services\Pdf\PdfSigningService;
 use App\Services\Pdf\PdfSplitService;
+use App\Services\Pdf\PdfTargetSizeCompressionService;
 use App\Services\Pdf\PdfToImageService;
+use App\Services\System\SystemBinaryDetector;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -37,7 +42,7 @@ class ProcessFileJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
-    public array $backoff = [5, 30, 60];
+    public int $timeout = 300;
 
     public function __construct(
         public string $fileJobId
@@ -48,13 +53,14 @@ class ProcessFileJob implements ShouldQueue
         PdfMergeService $pdfMerge,
         PdfSplitService $pdfSplit,
         PdfOrganizeService $pdfOrganize,
-        JpgToPdfService $jpgToPdf,
         PdfCompressionService $pdfCompress,
         PdfToImageService $pdfToImage,
+        JpgToPdfService $jpgToPdf,
         ImageCompressionService $imageCompress,
         ImageResizeService $imageResize,
         ImageConversionService $imageConvert,
-        ArchiveGeneratorService $archiver
+        ArchiveGeneratorService $archiver,
+        ?PdfSigningService $pdfSign = null
     ): void {
         $lock = Cache::lock("process_file_job:{$this->fileJobId}", 120);
 
@@ -70,91 +76,220 @@ class ProcessFileJob implements ShouldQueue
             $job = FileJob::find($this->fileJobId);
             if (!$job) {
                 Log::warning("ProcessFileJob: Job {$this->fileJobId} not found in database.");
-                $lock->release();
+                $this->releaseLockSafely($lock);
                 return;
             }
 
             // Idempotency: if already completed, exit cleanly without repeating work
             if ($job->status === JobStatus::COMPLETED) {
                 Log::info("ProcessFileJob: Job {$this->fileJobId} is already marked as completed. Skipping.");
-                $lock->release();
+                $this->releaseLockSafely($lock);
                 return;
             }
 
-            // Atomic state transition: pending -> processing
-            $updated = DB::table('file_jobs')
-                ->where('id', $job->id)
-                ->whereIn('status', [JobStatus::PENDING->value, JobStatus::FAILED->value, JobStatus::PROCESSING->value])
-                ->update([
-                    'status' => JobStatus::PROCESSING->value,
-                    'updated_at' => now(),
-                ]);
+            $job->update([
+                'status'                => JobStatus::PROCESSING,
+                'processing_started_at' => now(),
+            ]);
 
-            if (!$updated) {
-                $lock->release();
-                return;
-            }
-
-            $meta = $job->input_metadata ?? [];
             $jobDir = $storage->getJobDirectory($job->id);
+            $meta = $job->input_metadata ?? [];
 
             // Clean up any previously created output files to guarantee idempotency on retry
-            $this->cleanPreviousOutputs($job);
+            $this->cleanPreviousOutputs($job, $jobDir);
+            ProcessedFile::where('file_job_id', $job->id)->delete();
 
-            $outputs = [];
-            $totalInputBytes = 0;
+            $outputs = []; // Array of ['original_name', 'stored_filename', 'mime_type', 'original_size_bytes', 'processed_size_bytes']
+            $resultMeta = $meta;
 
             switch ($job->tool_type) {
                 case ToolType::MERGE_PDF:
-                    $sources = array_map(fn($f) => $jobDir . DIRECTORY_SEPARATOR . $f, $meta['files'] ?? []);
-                    $totalInputBytes = array_sum(array_map('filesize', array_filter($sources, 'file_exists')));
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_merged.pdf';
+                    $files = array_map(fn($f) => $jobDir . DIRECTORY_SEPARATOR . $f, $meta['files'] ?? []);
+                    $totalInputBytes = array_sum(array_map('filesize', array_filter($files, 'file_exists')));
+                    $outFilename = 'merged_output.pdf';
+                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
 
-                    $res = $pdfMerge->merge($sources, $outPath);
+                    $res = $pdfMerge->merge($files, $outPath);
+
                     $outputs[] = [
                         'original_name'        => $meta['output_filename'] ?? 'merged.pdf',
-                        'stored_filename'      => 'output_merged.pdf',
+                        'stored_filename'      => $outFilename,
                         'mime_type'            => 'application/pdf',
                         'original_size_bytes'  => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
+                    $resultMeta['engine'] = 'fpdi';
+                    $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
                     break;
 
                 case ToolType::SPLIT_PDF:
                     $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
-                    $mode = $meta['mode'] ?? 'all'; // 'all' or 'range'
+                    $mode = $meta['split_mode'] ?? ($meta['mode'] ?? 'range');
+                    $cleanBase = $meta['clean_name'] ?? 'document';
+                    $pageCount = file_exists($source) ? $pdfSplit->getPageCount($source) : 0;
 
                     if ($mode === 'range') {
-                        $range = $meta['range'] ?? '1';
-                        $pages = $pdfSplit->parsePageRange($range, 10000);
-                        $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_split_range.pdf';
-                        $res = $pdfSplit->extractPages($source, $outPath, $pages);
+                        // Support pre-parsed groups or raw range string
+                        if (!empty($meta['ranges']) && is_array($meta['ranges'])) {
+                            $groups = $meta['ranges'];
+                        } else {
+                            $rangeStr = $meta['range'] ?? '1';
+                            $groups = $pageCount > 0 ? $pdfSplit->parseRangeGroups($rangeStr, $pageCount) : [];
+                        }
 
-                        $outputs[] = [
-                            'original_name'        => 'split_pages_' . preg_replace('/[^0-9\-]/', '_', $range) . '.pdf',
-                            'stored_filename'      => 'output_split_range.pdf',
-                            'mime_type'            => 'application/pdf',
-                            'original_size_bytes'  => $totalInputBytes,
-                            'processed_size_bytes' => $res['size_bytes'],
-                        ];
+                        $createdFiles = [];
+                        foreach ($groups as $idx => $rangeSpec) {
+                            $partNum = $idx + 1;
+                            $label = $rangeSpec['range'] ?? ($rangeSpec['label'] ?? (string) $partNum);
+                            $outFilename = "split_part_{$partNum}.pdf";
+                            $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+
+                            $pages = $rangeSpec['pages'] ?? (isset($rangeSpec['start'], $rangeSpec['end']) ? range($rangeSpec['start'], $rangeSpec['end']) : [$partNum]);
+                            $res = $pdfSplit->extractPages($source, $outPath, $pages);
+
+                            $displayName = count($groups) === 1
+                                ? "{$cleanBase}_page_{$label}.pdf"
+                                : "{$cleanBase}_part_{$partNum}_pages_{$label}.pdf";
+
+                            $createdFiles[] = [
+                                'path'                 => $outPath,
+                                'original_name'        => $displayName,
+                                'stored_filename'      => $outFilename,
+                                'mime_type'            => 'application/pdf',
+                                'original_size_bytes'  => $totalInputBytes,
+                                'processed_size_bytes' => $res['size_bytes'],
+                            ];
+                        }
+
+                        if (count($createdFiles) > 1) {
+                            $zipStored = 'output_split_bundle.zip';
+                            $zipPath = $jobDir . DIRECTORY_SEPARATOR . $zipStored;
+                            $zipFiles = array_map(fn($cf) => $cf['path'], $createdFiles);
+                            $zipRes = $archiver->createZip($zipFiles, $zipPath);
+
+                            $outputs[] = [
+                                'original_name'        => "{$cleanBase}_split_bundle.zip",
+                                'stored_filename'      => $zipStored,
+                                'mime_type'            => 'application/zip',
+                                'original_size_bytes'  => $totalInputBytes,
+                                'processed_size_bytes' => $zipRes['size_bytes'],
+                            ];
+
+                            foreach ($createdFiles as $cf) {
+                                $outputs[] = [
+                                    'original_name'        => $cf['original_name'],
+                                    'stored_filename'      => $cf['stored_filename'],
+                                    'mime_type'            => $cf['mime_type'],
+                                    'original_size_bytes'  => $cf['original_size_bytes'],
+                                    'processed_size_bytes' => $cf['processed_size_bytes'],
+                                ];
+                            }
+                        } elseif (count($createdFiles) === 1) {
+                            $outputs[] = [
+                                'original_name'        => $createdFiles[0]['original_name'],
+                                'stored_filename'      => $createdFiles[0]['stored_filename'],
+                                'mime_type'            => $createdFiles[0]['mime_type'],
+                                'original_size_bytes'  => $totalInputBytes,
+                                'processed_size_bytes' => $createdFiles[0]['processed_size_bytes'],
+                            ];
+                        }
+                    } elseif ($mode === 'every_n') {
+                        $interval = max(1, (int) ($meta['every_n'] ?? 1));
+                        $groups = $pageCount > 0 ? $pdfSplit->generateEveryNGroups($pageCount, $interval) : [];
+
+                        $createdFiles = [];
+                        foreach ($groups as $idx => $group) {
+                            $partNum = $idx + 1;
+                            $rangeLabel = $group['range'] ?? (string) $partNum;
+                            $outFilename = "split_interval_{$partNum}.pdf";
+                            $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+
+                            $res = $pdfSplit->extractPages($source, $outPath, $group['pages']);
+                            $createdFiles[] = [
+                                'path'                 => $outPath,
+                                'original_name'        => "{$cleanBase}_part_{$partNum}_pages_{$rangeLabel}.pdf",
+                                'stored_filename'      => $outFilename,
+                                'mime_type'            => 'application/pdf',
+                                'original_size_bytes'  => $totalInputBytes,
+                                'processed_size_bytes' => $res['size_bytes'],
+                            ];
+                        }
+
+                        if (count($createdFiles) > 1) {
+                            $zipStored = 'output_split_every_n.zip';
+                            $zipPath = $jobDir . DIRECTORY_SEPARATOR . $zipStored;
+                            $zipFiles = array_map(fn($cf) => $cf['path'], $createdFiles);
+                            $zipRes = $archiver->createZip($zipFiles, $zipPath);
+
+                            $outputs[] = [
+                                'original_name'        => "{$cleanBase}_split_every_{$interval}_pages.zip",
+                                'stored_filename'      => $zipStored,
+                                'mime_type'            => 'application/zip',
+                                'original_size_bytes'  => $totalInputBytes,
+                                'processed_size_bytes' => $zipRes['size_bytes'],
+                            ];
+
+                            foreach ($createdFiles as $cf) {
+                                $outputs[] = [
+                                    'original_name'        => $cf['original_name'],
+                                    'stored_filename'      => $cf['stored_filename'],
+                                    'mime_type'            => $cf['mime_type'],
+                                    'original_size_bytes'  => $cf['original_size_bytes'],
+                                    'processed_size_bytes' => $cf['processed_size_bytes'],
+                                ];
+                            }
+                        } elseif (count($createdFiles) === 1) {
+                            $outputs[] = [
+                                'original_name'        => $createdFiles[0]['original_name'],
+                                'stored_filename'      => $createdFiles[0]['stored_filename'],
+                                'mime_type'            => $createdFiles[0]['mime_type'],
+                                'original_size_bytes'  => $totalInputBytes,
+                                'processed_size_bytes' => $createdFiles[0]['processed_size_bytes'],
+                            ];
+                        }
                     } else {
-                        // Split all pages and zip them
+                        // Extract all individual pages as zip
                         $splitDir = $jobDir . DIRECTORY_SEPARATOR . 'split_pages';
-                        $splitFiles = $pdfSplit->splitAllPages($source, $splitDir);
-                        $zipPath = $jobDir . DIRECTORY_SEPARATOR . 'output_split_pages.zip';
-                        $zipRes = $archiver->createZip($splitFiles, $zipPath);
+                        $pageFiles = $pdfSplit->splitAllPages($source, $splitDir);
+
+                        $zipFiles = array_map(fn($pf) => $pf['path'], $pageFiles);
+                        $zipStored = 'output_pages.zip';
+                        $zipPath = $jobDir . DIRECTORY_SEPARATOR . $zipStored;
+                        $zipRes = $archiver->createZip($zipFiles, $zipPath);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_split.zip',
-                            'stored_filename'      => 'output_split_pages.zip',
+                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_split_all.zip',
+                            'stored_filename'      => $zipStored,
                             'mime_type'            => 'application/zip',
                             'original_size_bytes'  => $totalInputBytes,
                             'processed_size_bytes' => $zipRes['size_bytes'],
                         ];
                     }
+                    $resultMeta['engine'] = 'fpdi';
+                    $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
                     break;
 
+                case ToolType::SIGN_PDF:
+                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $totalInputBytes = file_exists($source) ? filesize($source) : 0;
+                    $outFilename = 'output_signed.pdf';
+                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $placements = $meta['placements'] ?? [];
+
+                    $signer = $pdfSign ?? app(PdfSigningService::class);
+                    $res = $signer->sign($source, $outPath, $placements);
+
+                    $outputs[] = [
+                        'original_name'        => ($meta['clean_name'] ?? 'document') . '_signed.pdf',
+                        'stored_filename'      => $outFilename,
+                        'mime_type'            => 'application/pdf',
+                        'original_size_bytes'  => $totalInputBytes,
+                        'processed_size_bytes' => $res['size_bytes'],
+                    ];
+                    $resultMeta['engine'] = 'fpdi';
+                    $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
+                    break;
                 case ToolType::ORGANIZE_PDF:
                     $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
@@ -169,6 +304,8 @@ class ProcessFileJob implements ShouldQueue
                         'original_size_bytes'  => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
+                    $resultMeta['engine'] = 'fpdi';
+                    $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
                     break;
 
                 case ToolType::JPG_TO_PDF:
@@ -188,22 +325,57 @@ class ProcessFileJob implements ShouldQueue
                         'original_size_bytes'  => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
+                    $resultMeta['engine'] = 'fpdi';
+                    $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
                     break;
 
                 case ToolType::COMPRESS_PDF:
                     $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
-                    $level = CompressionLevel::tryFrom($meta['compression_level'] ?? '') ?? CompressionLevel::RECOMMENDED;
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_compressed.pdf';
+                    $outFilename = 'output_compressed.pdf';
+                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
 
-                    $res = $pdfCompress->compress($source, $outPath, $level);
-                    $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'document') . '_compressed.pdf',
-                        'stored_filename'      => 'output_compressed.pdf',
-                        'mime_type'            => 'application/pdf',
-                        'original_size_bytes'  => $totalInputBytes,
-                        'processed_size_bytes' => $res['processed_size'],
-                    ];
+                    if (($meta['compression_method'] ?? 'preset') === 'target') {
+                        $targetService = app(PdfTargetSizeCompressionService::class);
+                        $targetBytes = (int) ($meta['target_size_bytes'] ?? 500 * 1024);
+                        $priority = $meta['priority'] ?? 'balanced';
+
+                        $res = $targetService->compressToTarget($source, $outPath, $targetBytes, $priority);
+
+                        $outputs[] = [
+                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_compressed.pdf',
+                            'stored_filename'      => $outFilename,
+                            'mime_type'            => 'application/pdf',
+                            'original_size_bytes'  => $totalInputBytes,
+                            'processed_size_bytes' => $res['processed_size'],
+                        ];
+
+                        $resultMeta['savings_percent'] = $res['savings_percent'];
+                        $resultMeta['engine'] = 'ghostscript';
+                        $resultMeta['engine_label'] = 'Deep compression (Ghostscript)';
+                        $resultMeta['target_status'] = $res['target_status'];
+                        $resultMeta['target_achieved'] = $res['target_achieved'] ?? ($res['target_status'] === 'achieved');
+                        $resultMeta['target_size_bytes'] = $res['target_size'] ?? $targetBytes;
+                        $resultMeta['target_iterations'] = $res['iterations'];
+                        $resultMeta['target_explanation'] = $res['explanation'] ?? null;
+                        $resultMeta['diagnostics'] = $res['diagnostics'] ?? [];
+                    } else {
+                        $level = CompressionLevel::tryFrom($meta['compression_level'] ?? '') ?? CompressionLevel::RECOMMENDED;
+                        $res = $pdfCompress->compress($source, $outPath, $level);
+
+                        $outputs[] = [
+                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_compressed.pdf',
+                            'stored_filename'      => $outFilename,
+                            'mime_type'            => 'application/pdf',
+                            'original_size_bytes'  => $totalInputBytes,
+                            'processed_size_bytes' => $res['processed_size'],
+                        ];
+
+                        $resultMeta['savings_percent'] = $res['savings_percent'];
+                        $resultMeta['engine'] = $res['engine'];
+                        $resultMeta['engine_label'] = $res['is_deep'] ? 'Deep compression (Ghostscript)' : 'Limited optimization (Pure PHP)';
+                        $resultMeta['notice'] = $res['notice'] ?? null;
+                    }
                     break;
 
                 case ToolType::PDF_TO_JPG:
@@ -241,44 +413,98 @@ class ProcessFileJob implements ShouldQueue
                             'processed_size_bytes' => $zipRes['size_bytes'],
                         ];
                     }
+                    $resultMeta['engine'] = 'poppler';
+                    $resultMeta['engine_label'] = 'PDF rasterization (Poppler)';
                     break;
 
                 case ToolType::COMPRESS_IMAGE:
                     $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
-                    $level = CompressionLevel::tryFrom($meta['compression_level'] ?? '') ?? CompressionLevel::RECOMMENDED;
                     $ext = pathinfo($source, PATHINFO_EXTENSION);
                     $outFilename = 'output_compressed.' . $ext;
                     $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
 
-                    $res = $imageCompress->compress($source, $outPath, $level);
-                    $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'image') . '_compressed.' . $ext,
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => $res['mime_type'],
-                        'original_size_bytes'  => $totalInputBytes,
-                        'processed_size_bytes' => $res['processed_size'],
-                    ];
+                    if (($meta['compression_method'] ?? 'preset') === 'target') {
+                        $targetService = app(ImageTargetSizeCompressionService::class);
+                        $targetBytes = (int) ($meta['target_size_bytes'] ?? 200 * 1024);
+                        $priority = $meta['priority'] ?? 'balanced';
+
+                        $res = $targetService->compressToTarget($source, $outPath, $targetBytes, $priority);
+
+                        $outputs[] = [
+                            'original_name'        => ($meta['clean_name'] ?? 'image') . '_compressed.' . $ext,
+                            'stored_filename'      => $outFilename,
+                            'mime_type'            => $res['mime_type'],
+                            'original_size_bytes'  => $totalInputBytes,
+                            'processed_size_bytes' => $res['processed_size'],
+                        ];
+
+                        $resultMeta['savings_percent'] = $res['savings_percent'];
+                        $resultMeta['engine'] = 'gd';
+                        $resultMeta['engine_label'] = 'Image processing (GD)';
+                        $resultMeta['target_status'] = $res['target_status'];
+                        $resultMeta['target_achieved'] = $res['target_achieved'] ?? ($res['target_status'] === 'achieved');
+                        $resultMeta['target_size_bytes'] = $res['target_size'] ?? $targetBytes;
+                        $resultMeta['target_iterations'] = $res['iterations'];
+                        $resultMeta['target_explanation'] = $res['explanation'] ?? null;
+                        $resultMeta['dimension_changed'] = $res['dimension_changed'] ?? false;
+                        $resultMeta['dimensions'] = $res['dimensions'] ?? null;
+                        $resultMeta['original_dimensions'] = $res['original_dimensions'] ?? null;
+                        $resultMeta['quality_used'] = $res['quality_used'] ?? null;
+                        $resultMeta['diagnostics'] = $res['diagnostics'] ?? [];
+                    } else {
+                        $level = CompressionLevel::tryFrom($meta['compression_level'] ?? '') ?? CompressionLevel::RECOMMENDED;
+                        $res = $imageCompress->compress($source, $outPath, $level);
+
+                        $outputs[] = [
+                            'original_name'        => ($meta['clean_name'] ?? 'image') . '_compressed.' . $ext,
+                            'stored_filename'      => $outFilename,
+                            'mime_type'            => $res['mime_type'],
+                            'original_size_bytes'  => $totalInputBytes,
+                            'processed_size_bytes' => $res['processed_size'],
+                        ];
+
+                        $resultMeta['savings_percent'] = $res['savings_percent'];
+                        $resultMeta['engine'] = 'gd';
+                        $resultMeta['engine_label'] = 'Image processing (GD)';
+                        $resultMeta['notice'] = $res['notice'] ?? null;
+                    }
                     break;
 
                 case ToolType::RESIZE_IMAGE:
                     $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
-                    $w = !empty($meta['target_width']) ? (int) $meta['target_width'] : null;
-                    $h = !empty($meta['target_height']) ? (int) $meta['target_height'] : null;
-                    $fit = ImageFit::tryFrom($meta['fit'] ?? '') ?? ImageFit::CONTAIN;
                     $ext = pathinfo($source, PATHINFO_EXTENSION);
                     $outFilename = 'output_resized.' . $ext;
                     $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
 
-                    $res = $imageResize->resize($source, $outPath, $w, $h, $fit);
+                    $width = !empty($meta['target_width']) ? (int) $meta['target_width'] : (!empty($meta['width']) ? (int) $meta['width'] : null);
+                    $height = !empty($meta['target_height']) ? (int) $meta['target_height'] : (!empty($meta['height']) ? (int) $meta['height'] : null);
+                    $percentage = !empty($meta['percentage']) ? (int) $meta['percentage'] : null;
+
+                    if ($percentage && !$width && !$height && file_exists($source)) {
+                        $dims = @getimagesize($source);
+                        if ($dims && $dims[0] > 0 && $dims[1] > 0) {
+                            $pct = max(1, min(500, $percentage)) / 100.0;
+                            $width = (int) round($dims[0] * $pct);
+                            $height = (int) round($dims[1] * $pct);
+                        }
+                    }
+
+                    $fit = ImageFit::tryFrom($meta['fit'] ?? '') ?? ImageFit::CONTAIN;
+                    $quality = !empty($meta['quality']) ? (int) $meta['quality'] : 85;
+
+                    $res = $imageResize->resize($source, $outPath, $width, $height, $fit, $quality);
+
                     $outputs[] = [
                         'original_name'        => ($meta['clean_name'] ?? 'image') . '_resized.' . $ext,
                         'stored_filename'      => $outFilename,
                         'mime_type'            => $res['mime_type'],
                         'original_size_bytes'  => $totalInputBytes,
-                        'processed_size_bytes' => $res['processed_size'],
+                        'processed_size_bytes' => $res['processed_size'] ?? $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
                     ];
+                    $resultMeta['engine'] = 'gd';
+                    $resultMeta['engine_label'] = 'Image processing (GD)';
                     break;
 
                 case ToolType::CONVERT_IMAGE:
@@ -289,22 +515,74 @@ class ProcessFileJob implements ShouldQueue
                     $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
 
                     $res = $imageConvert->convert($source, $outPath, $targetFormat);
+
                     $outputs[] = [
                         'original_name'        => ($meta['clean_name'] ?? 'image') . '.' . $targetFormat,
                         'stored_filename'      => $outFilename,
                         'mime_type'            => $res['mime_type'],
                         'original_size_bytes'  => $totalInputBytes,
-                        'processed_size_bytes' => $res['processed_size'],
+                        'processed_size_bytes' => $res['processed_size'] ?? $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
                     ];
+                    $resultMeta['engine'] = 'gd';
+                    $resultMeta['engine_label'] = 'Image processing (GD)';
+                    break;
+
+                case ToolType::REMOVE_BACKGROUND:
+                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $totalInputBytes = file_exists($source) ? filesize($source) : 0;
+                    $outFilename = 'output_transparent.png';
+                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+
+                    $bgService = app(ImageBackgroundService::class);
+                    $options = $meta['options'] ?? [];
+                    $res = $bgService->removeBackground($source, $outPath, $options);
+
+                    $outputs[] = [
+                        'original_name'        => ($meta['clean_name'] ?? 'image') . '_nobg.png',
+                        'stored_filename'      => $outFilename,
+                        'mime_type'            => 'image/png',
+                        'original_size_bytes'  => $totalInputBytes,
+                        'processed_size_bytes' => $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
+                    ];
+                    $resultMeta['engine'] = $res['engine'];
+                    $resultMeta['engine_label'] = $res['engine_label'];
+                    $resultMeta['is_ai'] = $res['is_ai'];
+                    break;
+
+                case ToolType::CHANGE_BACKGROUND:
+                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $totalInputBytes = file_exists($source) ? filesize($source) : 0;
+                    $bgConfig = $meta['background_config'] ?? ['type' => 'solid', 'color' => '#FFFFFF'];
+
+                    if (($bgConfig['type'] ?? '') === 'image' && !empty($bgConfig['image_file'])) {
+                        $bgConfig['image_path'] = $jobDir . DIRECTORY_SEPARATOR . $bgConfig['image_file'];
+                    }
+
+                    $ext = ($bgConfig['type'] ?? '') === 'transparent' ? 'png' : 'png';
+                    $outFilename = 'output_changed.' . $ext;
+                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+
+                    $bgService = app(ImageBackgroundService::class);
+                    $options = $meta['options'] ?? [];
+                    $res = $bgService->changeBackground($source, $outPath, $bgConfig, $options);
+
+                    $outputs[] = [
+                        'original_name'        => ($meta['clean_name'] ?? 'image') . '_custom_bg.' . $ext,
+                        'stored_filename'      => $outFilename,
+                        'mime_type'            => 'image/png',
+                        'original_size_bytes'  => $totalInputBytes,
+                        'processed_size_bytes' => $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
+                    ];
+                    $resultMeta['engine'] = $res['engine'];
+                    $resultMeta['engine_label'] = $res['engine_label'];
+                    $resultMeta['is_ai'] = $res['is_ai'];
                     break;
             }
 
-            // Duration in milliseconds
             $durationMs = (int) round((hrtime(true) - $startTime) / 1e6);
 
-            // Persist output records & transition state atomically
-            DB::transaction(function () use ($job, $outputs, $durationMs, $totalInputBytes) {
-                // Delete existing records to avoid duplicates on retry
+            // Persist output files & transition state atomically
+            DB::transaction(function () use ($job, $outputs, $resultMeta, $durationMs, $totalInputBytes) {
                 ProcessedFile::where('file_job_id', $job->id)->delete();
 
                 foreach ($outputs as $out) {
@@ -320,12 +598,13 @@ class ProcessFileJob implements ShouldQueue
                 }
 
                 $job->update([
-                    'status'        => JobStatus::COMPLETED,
-                    'duration_ms'   => $durationMs,
-                    'error_message' => null,
+                    'status'                 => JobStatus::COMPLETED,
+                    'processing_finished_at' => now(),
+                    'duration_ms'            => $durationMs,
+                    'input_metadata'         => $resultMeta,
+                    'error_message'          => null,
                 ]);
 
-                // Record idempotent telemetry
                 $ip = $job->input_metadata['ip'] ?? '127.0.0.1';
                 ToolUsage::log(
                     toolType: $job->tool_type->value,
@@ -337,17 +616,21 @@ class ProcessFileJob implements ShouldQueue
                 );
             });
 
+            $this->releaseLockSafely($lock);
             Log::info("ProcessFileJob: Successfully completed job {$job->id} in {$durationMs}ms.");
         } catch (Throwable $e) {
             $durationMs = (int) round((hrtime(true) - $startTime) / 1e6);
-            Log::error("ProcessFileJob: Failed execution for job {$this->fileJobId}: {$e->getMessage()}");
+            Log::error("ProcessFileJob: Failed execution for job {$this->fileJobId}: {$e->getMessage()}", [
+                'trace' => $e->getTraceAsString(),
+            ]);
 
             $job = FileJob::find($this->fileJobId);
             if ($job) {
                 $job->update([
-                    'status'        => JobStatus::FAILED,
-                    'duration_ms'   => $durationMs,
-                    'error_message' => $e->getMessage(),
+                    'status'                 => JobStatus::FAILED,
+                    'processing_finished_at' => now(),
+                    'duration_ms'            => $durationMs,
+                    'error_message'          => $e->getMessage(),
                 ]);
 
                 $ip = $job->input_metadata['ip'] ?? '127.0.0.1';
@@ -361,38 +644,42 @@ class ProcessFileJob implements ShouldQueue
                 );
             }
 
-            $lock->release();
+            $this->releaseLockSafely($lock);
             throw $e;
         }
-
-        $lock->release();
     }
 
-    /**
-     * Clean up previous outputs before starting processing to prevent duplicates on retries.
-     */
-    protected function cleanPreviousOutputs(FileJob $job): void
+    protected function releaseLockSafely(?\Illuminate\Contracts\Cache\Lock $lock): void
     {
-        $existing = ProcessedFile::where('file_job_id', $job->id)->get();
-        $storage = app(FileStorageManager::class);
-        $jobDir = $storage->getJobDirectory($job->id);
-
-        foreach ($existing as $file) {
-            $path = $jobDir . DIRECTORY_SEPARATOR . $file->stored_filename;
-            if (file_exists($path)) {
-                @unlink($path);
-            }
+        if (!$lock) {
+            return;
         }
+        try {
+            $lock->release();
+        } catch (Throwable $e) {
+            Log::debug("ProcessFileJob: Lock release note: {$e->getMessage()}");
+        }
+    }
 
-        // Clean up common output files
-        $patterns = ['output_*.*', 'rendered_pages', 'split_pages'];
+    protected function cleanPreviousOutputs(FileJob $job, string $jobDir): void
+    {
+        $patterns = [
+            'output_*.*',
+            'rendered_pages',
+            'split_pages',
+            'split_part_*.pdf',
+            'split_interval_*.pdf',
+        ];
+
         foreach ($patterns as $pattern) {
             $matches = glob($jobDir . DIRECTORY_SEPARATOR . $pattern);
-            foreach ($matches as $match) {
-                if (is_dir($match)) {
-                    $this->deleteDirRecursively($match);
-                } elseif (is_file($match)) {
-                    @unlink($match);
+            if ($matches) {
+                foreach ($matches as $match) {
+                    if (is_dir($match)) {
+                        $this->deleteDirRecursively($match);
+                    } elseif (is_file($match)) {
+                        @unlink($match);
+                    }
                 }
             }
         }

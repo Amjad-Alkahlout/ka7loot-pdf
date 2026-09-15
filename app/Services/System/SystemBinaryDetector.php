@@ -11,6 +11,8 @@ class SystemBinaryDetector
     protected ?string $popplerPath = null;
     protected ?string $ghostscriptVersion = null;
     protected ?string $popplerVersion = null;
+    protected ?string $nodePath = null;
+    protected ?string $nodeVersion = null;
 
     protected bool $probed = false;
 
@@ -31,6 +33,8 @@ class SystemBinaryDetector
             $this->ghostscriptVersion = $cached['gs_version'] ?? null;
             $this->popplerPath = $cached['poppler_path'] ?? null;
             $this->popplerVersion = $cached['poppler_version'] ?? null;
+            $this->nodePath = $cached['node_path'] ?? null;
+            $this->nodeVersion = $cached['node_version'] ?? null;
             $this->probed = true;
             return;
         }
@@ -41,11 +45,16 @@ class SystemBinaryDetector
         // 2. Detect Poppler (pdftoppm)
         $this->detectPoppler();
 
+        // 3. Detect Node.js
+        $this->detectNode();
+
         Cache::put($cacheKey, [
             'gs_path' => $this->ghostscriptPath,
             'gs_version' => $this->ghostscriptVersion,
             'poppler_path' => $this->popplerPath,
             'poppler_version' => $this->popplerVersion,
+            'node_path' => $this->nodePath,
+            'node_version' => $this->nodeVersion,
         ], now()->addHours(6));
 
         $this->probed = true;
@@ -85,6 +94,50 @@ class SystemBinaryDetector
     {
         $this->probe();
         return $this->popplerVersion;
+    }
+
+    public function hasNode(): bool
+    {
+        $this->probe();
+        return $this->nodePath !== null;
+    }
+
+    public function getNodePath(): ?string
+    {
+        $this->probe();
+        return $this->nodePath;
+    }
+
+    public function getNodeVersion(): ?string
+    {
+        $this->probe();
+        return $this->nodeVersion;
+    }
+
+    public function getPdfinfoPath(): ?string
+    {
+        $this->probe();
+        if ($this->popplerPath) {
+            $dir = dirname($this->popplerPath);
+            $candidate = $dir . DIRECTORY_SEPARATOR . (PHP_OS_FAMILY === 'Windows' ? 'pdfinfo.exe' : 'pdfinfo');
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+        return $this->findExecutable('pdfinfo');
+    }
+
+    public function getPdftotextPath(): ?string
+    {
+        $this->probe();
+        if ($this->popplerPath) {
+            $dir = dirname($this->popplerPath);
+            $candidate = $dir . DIRECTORY_SEPARATOR . (PHP_OS_FAMILY === 'Windows' ? 'pdftotext.exe' : 'pdftotext');
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+        return $this->findExecutable('pdftotext');
     }
 
     public function canRasterizePdf(): bool
@@ -128,18 +181,18 @@ class SystemBinaryDetector
         // Known default install locations on Windows
         if (PHP_OS_FAMILY === 'Windows') {
             $programFiles = [
-                getenv('ProgramFiles') ?: 'C:\Program Files',
-                getenv('ProgramFiles(x86)') ?: 'C:\Program Files (x86)',
-                'C:\tools\ghostscript',
+                getenv('ProgramFiles') ?: 'C:\\Program Files',
+                getenv('ProgramFiles(x86)') ?: 'C:\\Program Files (x86)',
+                'C:\\tools\\ghostscript',
             ];
             foreach ($programFiles as $base) {
-                $gsFolder = $base . '\gs';
+                $gsFolder = $base . '\\gs';
                 if (is_dir($gsFolder)) {
                     foreach (scandir($gsFolder) as $sub) {
                         if ($sub === '.' || $sub === '..') {
                             continue;
                         }
-                        $binPath = $gsFolder . DIRECTORY_SEPARATOR . $sub . '\bin\gswin64c.exe';
+                        $binPath = $gsFolder . DIRECTORY_SEPARATOR . $sub . '\\bin\\gswin64c.exe';
                         if (file_exists($binPath)) {
                             $candidates[] = $binPath;
                         }
@@ -176,11 +229,11 @@ class SystemBinaryDetector
 
         // Known default install locations on Windows (Chocolatey, Scoop, manual)
         if (PHP_OS_FAMILY === 'Windows') {
-            $chocoPoppler = 'C:\ProgramData\chocolatey\lib\poppler\tools';
+            $chocoPoppler = 'C:\\ProgramData\\chocolatey\\lib\\poppler\\tools';
             if (is_dir($chocoPoppler)) {
-                $candidates[] = $chocoPoppler . '\pdftoppm.exe';
+                $candidates[] = $chocoPoppler . '\\pdftoppm.exe';
             }
-            $chocoPopplerBin = 'C:\ProgramData\chocolatey\bin\pdftoppm.exe';
+            $chocoPopplerBin = 'C:\\ProgramData\\chocolatey\\bin\\pdftoppm.exe';
             if (file_exists($chocoPopplerBin)) {
                 $candidates[] = $chocoPopplerBin;
             }
@@ -191,6 +244,32 @@ class SystemBinaryDetector
             if ($path) {
                 $this->popplerPath = $path;
                 $this->popplerVersion = $this->queryVersion([$path, '-v']);
+                return;
+            }
+        }
+    }
+
+    /**
+     * Locate Node.js executable.
+     */
+    protected function detectNode(): void
+    {
+        $configured = config('fileprocessor.binaries.node');
+        if ($configured && file_exists($configured)) {
+            $this->nodePath = $configured;
+            $this->nodeVersion = $this->queryVersion([$configured, '--version']);
+            return;
+        }
+
+        $candidates = PHP_OS_FAMILY === 'Windows'
+            ? ['node.exe', 'node', 'C:\\Program Files\\nodejs\\node.exe']
+            : ['node'];
+
+        foreach ($candidates as $candidate) {
+            $path = $this->findExecutable($candidate);
+            if ($path) {
+                $this->nodePath = $path;
+                $this->nodeVersion = $this->queryVersion([$path, '--version']);
                 return;
             }
         }

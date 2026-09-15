@@ -38,14 +38,14 @@ class SanitizeUploadedFileAction
     {
         if (!$file->isValid()) {
             throw ValidationException::withMessages([
-                'file' => [__('ui.error_upload_corrupt', ['default' => 'The uploaded file is corrupt or incomplete.'])]
+                'file' => [__('ui.error_upload_corrupt')]
             ]);
         }
 
         $realPath = $file->getRealPath();
         if (!$realPath || !file_exists($realPath)) {
             throw ValidationException::withMessages([
-                'file' => [__('ui.error_upload_unreadable', ['default' => 'Unable to read the uploaded file.'])]
+                'file' => [__('ui.error_upload_unreadable')]
             ]);
         }
 
@@ -62,14 +62,14 @@ class SanitizeUploadedFileAction
         // 2. Validate against global allowed types
         if (!array_key_exists($detectedMime, self::ALLOWED_TYPES)) {
             throw ValidationException::withMessages([
-                'file' => [__('ui.error_unsupported_format', ['default' => 'Unsupported file format.'])]
+                'file' => [__('ui.error_unsupported_format')]
             ]);
         }
 
         // 3. Validate against tool-specific whitelist if provided
         if (!empty($allowedMimeTypes) && !in_array($detectedMime, $allowedMimeTypes, true)) {
             throw ValidationException::withMessages([
-                'file' => [__('ui.error_format_not_allowed_for_tool', ['default' => 'This file type is not allowed for this tool.'])]
+                'file' => [__('ui.error_format_not_allowed_for_tool')]
             ]);
         }
 
@@ -79,7 +79,7 @@ class SanitizeUploadedFileAction
         if (!in_array($clientExt, $validExtensions, true)) {
             // Discrepancy between magic bytes and client extension (e.g. .exe renamed to .pdf)
             throw ValidationException::withMessages([
-                'file' => [__('ui.error_extension_mismatch', ['default' => 'File extension does not match its genuine content.'])]
+                'file' => [__('ui.error_extension_mismatch')]
             ]);
         }
 
@@ -88,15 +88,17 @@ class SanitizeUploadedFileAction
         if ($detectedMime === 'application/pdf') {
             $maxPdfKb = config('fileprocessor.limits.max_pdf_size_kb', 51200);
             if ($sizeBytes > ($maxPdfKb * 1024)) {
+                $maxMb = (int) round($maxPdfKb / 1024);
                 throw ValidationException::withMessages([
-                    'file' => [__('ui.error_pdf_too_large', ['default' => "PDF exceeds maximum allowed size of {$maxPdfKb} KB."])]
+                    'file' => [__('ui.error_pdf_too_large', ['size' => $maxMb])]
                 ]);
             }
         } else {
             $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
             if ($sizeBytes > ($maxImageKb * 1024)) {
+                $maxMb = (int) round($maxImageKb / 1024);
                 throw ValidationException::withMessages([
-                    'file' => [__('ui.error_image_too_large', ['default' => "Image exceeds maximum allowed size of {$maxImageKb} KB."])]
+                    'file' => [__('ui.error_image_too_large', ['size' => $maxMb])]
                 ]);
             }
         }

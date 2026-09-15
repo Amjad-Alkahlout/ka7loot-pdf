@@ -22,12 +22,14 @@ class JpgToPdfComponent extends BaseToolComponent
 
     public function updatedUploads(): void
     {
+        $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
+
         $this->validate([
-            'uploads.*' => 'required|file|max:20480',
+            'uploads.*' => "required|file|max:{$maxImageKb}",
         ]);
 
         if (!empty($this->uploads)) {
-            $this->jobStatus = 'ready';
+            $this->jobStatus = 'uploaded';
         }
     }
 
@@ -41,16 +43,52 @@ class JpgToPdfComponent extends BaseToolComponent
         }
     }
 
+    public function moveUp(int $index): void
+    {
+        if ($index > 0 && isset($this->uploads[$index], $this->uploads[$index - 1])) {
+            $temp = $this->uploads[$index - 1];
+            $this->uploads[$index - 1] = $this->uploads[$index];
+            $this->uploads[$index] = $temp;
+        }
+    }
+
+    public function moveDown(int $index): void
+    {
+        if ($index < count($this->uploads) - 1 && isset($this->uploads[$index], $this->uploads[$index + 1])) {
+            $temp = $this->uploads[$index + 1];
+            $this->uploads[$index + 1] = $this->uploads[$index];
+            $this->uploads[$index] = $temp;
+        }
+    }
+
+    public function getImageDimensions($file): ?array
+    {
+        try {
+            $path = $file->getRealPath();
+            if ($path && file_exists($path)) {
+                $info = @getimagesize($path);
+                if ($info && !empty($info[0]) && !empty($info[1])) {
+                    return ['width' => $info[0], 'height' => $info[1]];
+                }
+            }
+        } catch (\Throwable) {}
+
+        return null;
+    }
+
     public function process(
         SanitizeUploadedFileAction $sanitizer,
         FileStorageManager $storage,
         DispatchFileJobAction $dispatcher
     ): void {
+        $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
+
         $this->validate([
-            'uploads' => 'required|array|min:1',
-            'pageSize' => 'required|in:a4,letter,legal,fit',
+            'uploads'     => 'required|array|min:1',
+            'uploads.*'   => "required|file|max:{$maxImageKb}",
+            'pageSize'    => 'required|in:a4,letter,legal,fit',
             'orientation' => 'required|in:portrait,landscape,auto',
-            'margin' => 'required|numeric|min:0|max:50',
+            'margin'      => 'required|numeric|min:0|max:50',
         ]);
 
         $this->jobStatus = 'processing';

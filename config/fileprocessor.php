@@ -41,7 +41,7 @@ return [
     'queues' => [
         'sync_threshold_pages'   => (int) env('FP_QUEUE_THRESHOLD_PAGES', 5),
         'sync_threshold_size_kb' => (int) env('FP_QUEUE_THRESHOLD_SIZE_KB', 10240), // 10 MB
-        'default_queue'          => env('FP_DEFAULT_QUEUE', 'file-processing'),
+        'default_queue'          => env('FP_DEFAULT_QUEUE', 'default'),
     ],
 
     /*
@@ -73,6 +73,50 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Target Size Compression Settings
+    |--------------------------------------------------------------------------
+    |
+    | Configurable limits and iteration profiles for target size compression.
+    |
+    */
+    'target_compression' => [
+        'min_target_kb' => (int) env('FP_TARGET_MIN_KB', 10),
+        'max_target_mb' => (int) env('FP_TARGET_MAX_MB', 50),
+        'image' => [
+            'max_iterations' => 10,
+            'min_quality'    => 15,
+            'min_dimension'  => 80,
+        ],
+        'pdf' => [
+            'max_iterations' => 6,
+            'min_dpi'        => 50,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Background Removal Engine Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for background removal engines, active engine selection,
+    | available drivers, and safety limits.
+    |
+    */
+    'background_removal' => [
+        'engine' => env('FP_BACKGROUND_REMOVAL_ENGINE', 'hybrid'),
+        'engines' => [
+            'hybrid'         => \App\Services\Image\HybridBackgroundRemovalEngine::class,
+            'ml_modnet'      => \App\Services\Image\ModnetBackgroundRemovalEngine::class,
+            'advanced'       => \App\Services\Image\AdvancedBackgroundRemovalEngine::class,
+            'color_sampling' => \App\Services\Image\ColorSamplingBackgroundRemovalEngine::class,
+        ],
+        'max_dimension'     => (int) env('FP_BG_MAX_DIMENSION', 4096),
+        'default_tolerance' => (float) env('FP_BG_DEFAULT_TOLERANCE', 25.0),
+        'default_feather'   => (int) env('FP_BG_DEFAULT_FEATHER', 2),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | System Binaries Configuration
     |--------------------------------------------------------------------------
     |
@@ -83,6 +127,7 @@ return [
     'binaries' => [
         'ghostscript' => env('FP_GHOSTSCRIPT_PATH', null),
         'poppler'     => env('FP_POPPLER_PATH', null),
+        'node'        => env('FP_NODE_PATH', null),
     ],
 
     /*
