@@ -9,3 +9,13 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* Prevent card hover transform effects on touch devices */
+@media (hover: none), (pointer: coarse) {
+    .hover\:-translate-y-1:hover,
+    .group:hover .group-hover\:translate-x-1,
+    .group:hover .rtl\:group-hover\:-translate-x-1,
+    .group:hover .group-hover\:scale-105 {
+        transform: none !important;
+    }
+}

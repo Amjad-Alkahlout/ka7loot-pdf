@@ -15,6 +15,25 @@ class PublicShareDownloadController extends Controller
     ) {}
 
     /**
+     * Show / redirect to the download endpoint for the shared file.
+     */
+    public function show(Request $request, string $token)
+    {
+        $share = $this->shareService->findShareByToken($token);
+
+        if (!$share) {
+            abort(Response::HTTP_NOT_FOUND, __('tools.share.not_found'));
+        }
+
+        $validation = $this->shareService->validateShare($share);
+        if (!$validation['valid']) {
+            abort($validation['status_code'], $validation['error']);
+        }
+
+        return redirect()->route('share.download', ['token' => $token]);
+    }
+
+    /**
      * Download the shared file via its secure opaque token.
      */
     public function download(Request $request, string $token)
@@ -80,7 +99,7 @@ class PublicShareDownloadController extends Controller
             abort($validation['status_code'], $validation['error']);
         }
 
-        $url = route('share.download', ['token' => $token]);
+        $url = $this->shareService->generatePublicShareUrl($token);
         $svg = $this->shareService->generateQrSvg($url);
 
         return response($svg, Response::HTTP_OK, [

@@ -52,7 +52,7 @@
 </head>
 <body class="flex min-h-full flex-col bg-slate-50 text-slate-800">
     <!-- Navbar -->
-    <header class="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
+    <header class="sticky top-0 z-40 border-b border-slate-200/80 bg-white md:bg-white/95 md:backdrop-blur-md">
         <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
             <div class="flex items-center gap-3">
                 <a href="{{ route('home', [], false) }}" class="flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900 transition hover:opacity-90">

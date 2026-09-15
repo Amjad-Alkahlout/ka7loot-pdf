@@ -33,6 +33,17 @@ class TemporaryShareService
     }
 
     /**
+     * Generate the public download URL for a temporary share token based strictly on config('app.url').
+     * Never derives host from an internal or request-scoped host.
+     */
+    public function generatePublicShareUrl(string $token): string
+    {
+        $baseUrl = rtrim((string) config('app.url', 'http://localhost'), '/');
+
+        return "{$baseUrl}/s/{$token}/download";
+    }
+
+    /**
      * Create a new temporary share record and generate its corresponding QR code.
      *
      * @return array{share: TemporaryShare, token: string, url: string, qr_svg: string}
@@ -81,7 +92,7 @@ class TemporaryShareService
             'download_count'    => 0,
         ]);
 
-        $url = route('share.download', ['token' => $token]);
+        $url = $this->generatePublicShareUrl($token);
         $qrSvg = $this->generateQrSvg($url);
 
         return [

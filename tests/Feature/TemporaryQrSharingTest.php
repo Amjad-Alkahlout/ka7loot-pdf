@@ -98,6 +98,82 @@ class TemporaryQrSharingTest extends TestCase
         $this->assertStringContainsString($result['url'], $result['url']);
     }
 
+    public function test_public_share_url_and_qr_are_derived_from_config_app_url(): void
+    {
+        config(['app.url' => 'https://ka7lootpdf.me']);
+
+        [$job, $file] = $this->createCompletedJobWithFile();
+
+        $result = $this->shareService->createShare(
+            job: $job,
+            file: $file,
+            expirationMinutes: 15
+        );
+
+        $token = $result['token'];
+        $expectedUrl = "https://ka7lootpdf.me/s/{$token}/download";
+
+        $this->assertEquals($expectedUrl, $result['url']);
+        $this->assertEquals($expectedUrl, $this->shareService->generatePublicShareUrl($token));
+    }
+
+    public function test_public_share_url_ignores_internal_request_host(): void
+    {
+        config(['app.url' => 'https://ka7lootpdf.me']);
+
+        [$job, $file] = $this->createCompletedJobWithFile();
+
+        // Simulate an internal request coming from localhost or a container host
+        $this->withServerVariables(['HTTP_HOST' => 'internal-backend.local:8080']);
+
+        $result = $this->shareService->createShare(
+            job: $job,
+            file: $file,
+            expirationMinutes: 15
+        );
+
+        $token = $result['token'];
+        $expectedUrl = "https://ka7lootpdf.me/s/{$token}/download";
+
+        $this->assertEquals($expectedUrl, $result['url']);
+        $this->assertStringNotContainsString('internal-backend.local', $result['url']);
+    }
+
+    public function test_share_show_route_redirects_to_download_for_valid_token(): void
+    {
+        [$job, $file] = $this->createCompletedJobWithFile('redirect test content', 'document.pdf');
+
+        $result = $this->shareService->createShare($job, $file, 15);
+        $token = $result['token'];
+
+        $response = $this->get("/s/{$token}");
+
+        $response->assertRedirect(route('share.download', ['token' => $token]));
+    }
+
+    public function test_share_show_route_fails_with_410_for_expired_token(): void
+    {
+        [$job, $file] = $this->createCompletedJobWithFile();
+
+        $result = $this->shareService->createShare($job, $file, 15);
+        $token = $result['token'];
+
+        TemporaryShare::where('id', $result['share']->id)->update([
+            'expires_at' => now()->subMinutes(10),
+        ]);
+
+        $response = $this->get("/s/{$token}");
+        $response->assertStatus(410);
+    }
+
+    public function test_share_show_route_fails_with_404_for_unknown_token(): void
+    {
+        $fakeToken = Str::random(64);
+
+        $response = $this->get("/s/{$fakeToken}");
+        $response->assertStatus(404);
+    }
+
     public function test_share_cannot_be_created_from_pending_failed_or_expired_job(): void
     {
         $pendingJob = FileJob::create([

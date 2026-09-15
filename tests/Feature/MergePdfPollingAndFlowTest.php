@@ -49,8 +49,8 @@ class MergePdfPollingAndFlowTest extends TestCase
         Livewire::test(MergePdfComponent::class)
             ->set('jobStatus', 'processing')
             ->set('statusMessage', 'Processing...')
-            ->assertSeeHtml('wire:poll.1s="pollJobStatus"')
-            ->assertDontSeeHtml('wire:poll.1s=\"pollJobStatus\"');
+            ->assertSeeHtml('wire:poll.2500ms="pollJobStatus"')
+            ->assertDontSeeHtml('wire:poll.2500ms=\"pollJobStatus\"');
     }
 
     public function test_merge_pdf_polling_transitions_to_completed_and_renders_result(): void
