@@ -56,7 +56,7 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. Configure and install required PHP extensions
+# 3. Configure and install required PHP extensions (OPcache is already built into PHP 8.5 core)
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j$(nproc) \
         gd \
@@ -64,45 +64,69 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
         exif \
         zip \
         intl \
-        bcmath \
-        opcache
+        bcmath
 
-# 4. Install Composer binary from official Composer image
+# 4. Verify required PHP extensions and capabilities at build time
+RUN php -m \
+    && php --ri gd \
+    && (php --ri opcache 2>/dev/null || php --ri "Zend OPcache") \
+    && php --ri pdo_mysql \
+    && php -r '\
+        $exts = ["gd", "pdo_mysql", "exif", "zip", "intl", "bcmath", "mbstring", "sodium", "PDO"]; \
+        foreach ($exts as $e) { \
+            if (!extension_loaded($e)) { \
+                fwrite(STDERR, "Extension " . $e . " is missing\n"); \
+                exit(1); \
+            } \
+        } \
+        if (!extension_loaded("Zend OPcache") && !extension_loaded("opcache")) { \
+            fwrite(STDERR, "OPcache extension is missing\n"); \
+            exit(1); \
+        } \
+        $g = gd_info(); \
+        if (empty($g["JPEG Support"]) || empty($g["WebP Support"]) || empty($g["FreeType Support"])) { \
+            fwrite(STDERR, "GD capabilities missing\n"); \
+            exit(1); \
+        } \
+        echo "Build-time verification: All required PHP extensions and GD capabilities are verified.\n"; \
+    '
+
+# 5. Install Composer binary from official Composer image
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# 5. Set working directory
+# 6. Set working directory
 WORKDIR /var/www/html
 
-# 6. Install PHP Composer dependencies (production only, no dev, optimized autoloader)
+# 7. Install PHP Composer dependencies (production only, no dev, optimized autoloader)
 COPY composer.json composer.lock ./
 RUN composer install --no-dev --no-interaction --no-progress --optimize-autoloader --no-scripts
 
-# 7. Install Node.js production dependencies (koffi, transformers, reshaper, bidi)
+# 8. Install Node.js production dependencies (koffi, transformers, reshaper, bidi)
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-# 8. Copy full application codebase (filtered by .dockerignore)
+# 9. Copy full application codebase (filtered by .dockerignore)
 COPY . .
 
-# 9. Copy compiled Vite assets from Stage 1
+# 10. Copy compiled Vite assets from Stage 1
 COPY --from=assets /app/public/build /var/www/html/public/build
 
-# 10. Generate authoritative optimized autoloader
+# 11. Generate authoritative optimized autoloader
 RUN composer dump-autoload --optimize --no-dev
 
-# 11. Copy custom configuration files
+# 12. Copy custom configuration files
 COPY docker/php/php.ini $PHP_INI_DIR/conf.d/custom.ini
 COPY docker/php/php-fpm.conf /usr/local/etc/php-fpm.d/zz-docker.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# 12. Enforce binary and script execution permissions
+# 13. Enforce binary and script execution permissions
 RUN chmod +x /usr/local/bin/entrypoint.sh \
     && chmod 755 /var/www/html/bin/pdfium/linux-x64/lib/libpdfium.so \
     && chmod +x /var/www/html/bin/*.cjs /var/www/html/bin/*.mjs \
     && chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-# 13. Enforce immutability on MODNet neural model
+# 14. Enforce immutability on MODNet neural model
 RUN if [ -d "/var/www/html/storage/app/models" ]; then chmod -R 555 /var/www/html/storage/app/models; fi
 
 EXPOSE 9000
