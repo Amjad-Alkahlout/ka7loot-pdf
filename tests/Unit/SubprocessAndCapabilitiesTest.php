@@ -118,10 +118,19 @@ class SubprocessAndCapabilitiesTest extends TestCase
         $source = $this->createSamplePdf('source_doc.pdf');
         $outDir = $this->testDir . DIRECTORY_SEPARATOR . 'images';
 
+        $expectedCmd = PdfToImageService::getPopplerInstallCommand();
+
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Poppler utility \(pdftoppm\).*choco install poppler/i');
+        $this->expectExceptionMessageMatches('/Poppler utility \(pdftoppm\).*' . preg_quote($expectedCmd, '/') . '/i');
 
         $service->convertPdfToImages($source, $outDir);
+    }
+
+    public function test_poppler_install_command_is_platform_appropriate(): void
+    {
+        $this->assertSame('choco install poppler -y', PdfToImageService::getPopplerInstallCommand('Windows'));
+        $this->assertSame('sudo apt-get install poppler-utils', PdfToImageService::getPopplerInstallCommand('Linux'));
+        $this->assertSame('brew install poppler', PdfToImageService::getPopplerInstallCommand('Darwin'));
     }
 
     public function test_subprocess_executor_runs_safe_command(): void
@@ -130,7 +139,7 @@ class SubprocessAndCapabilitiesTest extends TestCase
         $result = $executor->execute([PHP_BINARY, '-v']);
 
         $this->assertEquals(0, $result['exit_code']);
-        $this->assertStringContainsString('PHP 8.5', $result['output']);
+        $this->assertStringContainsString('PHP ' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION, $result['output']);
     }
 
     public function test_subprocess_executor_fails_on_nonexistent_command(): void

@@ -15,6 +15,20 @@ class PdfToImageService
     ) {}
 
     /**
+     * Get platform-appropriate installation recommendation for Poppler.
+     */
+    public static function getPopplerInstallCommand(?string $osFamily = null): string
+    {
+        $family = $osFamily ?? PHP_OS_FAMILY;
+
+        return match ($family) {
+            'Windows' => 'choco install poppler -y',
+            'Darwin'  => 'brew install poppler',
+            default   => 'sudo apt-get install poppler-utils',
+        };
+    }
+
+    /**
      * Convert PDF pages into individual image files.
      *
      * @param string $sourcePath Absolute path to source PDF
@@ -37,9 +51,7 @@ class PdfToImageService
         }
 
         if (!$this->detector->hasPoppler()) {
-            $installCmd = PHP_OS_FAMILY === 'Windows'
-                ? 'choco install poppler -y'
-                : 'sudo apt-get install poppler-utils';
+            $installCmd = self::getPopplerInstallCommand();
 
             throw new RuntimeException(
                 "PDF to Image rasterization requires the Poppler utility (pdftoppm). " .
@@ -68,32 +80,40 @@ class PdfToImageService
 
         try {
             $this->executor->execute($cmd);
-        } catch (\Throwable $e) {
-            throw new RuntimeException("Poppler rendering failed: {$e->getMessage()}", 0, $e);
+        } catch (\Exception $e) {
+            throw new RuntimeException("PDF to Image conversion failed during pdftoppm execution: {$e->getMessage()}", 0, $e);
         }
 
-        // Scan for generated images
-        $ext = ($cleanFormat === 'png') ? 'png' : 'jpg';
-        $mime = ($cleanFormat === 'png') ? 'image/png' : 'image/jpeg';
+        // Gather and sort all generated page image files
+        $pattern = $outPrefix . '-*.' . ($cleanFormat === 'png' ? 'png' : 'jpg');
+        $files = glob($pattern);
 
-        $pattern = $outputDir . DIRECTORY_SEPARATOR . $prefix . '-*.' . $ext;
-        $found = glob($pattern);
-        sort($found);
+        if (!$files) {
+            // Also check for jpeg extension if jpg was not found
+            if ($cleanFormat !== 'png') {
+                $files = glob($outPrefix . '-*.jpeg') ?: [];
+            } else {
+                $files = [];
+            }
+        }
+
+        natsort($files);
 
         $results = [];
-        $pageNum = 1;
-        foreach ($found as $filePath) {
+        $pageNumber = 1;
+        $mimeType = ($cleanFormat === 'png') ? 'image/png' : 'image/jpeg';
+
+        foreach ($files as $filePath) {
             $results[] = [
                 'path'      => $filePath,
                 'name'      => basename($filePath),
-                'page'      => $pageNum,
-                'mime_type' => $mime,
+                'page'      => $pageNumber++,
+                'mime_type' => $mimeType,
             ];
-            $pageNum++;
         }
 
         if (empty($results)) {
-            throw new RuntimeException("Poppler completed execution but no image files were produced.");
+            throw new RuntimeException("No images were produced from PDF rasterization.");
         }
 
         return $results;

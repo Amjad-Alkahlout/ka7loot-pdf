@@ -123,8 +123,10 @@ class ImageCompressionFunctionalTest extends TestCase
         $out = $this->tmpDir . '/output_scale.jpg';
 
         $origSize = filesize($src);
-        // Request aggressive target: 10% of original
-        $targetBytes = max(5000, (int) round($origSize * 0.10));
+        // Request aggressive target (3% of original) that cannot be achieved
+        // by quality reduction alone on any platform/libjpeg implementation,
+        // forcing the algorithm to progress into dimension downscaling once quality floor is reached.
+        $targetBytes = max(3000, (int) round($origSize * 0.03));
 
         $service = new ImageTargetSizeCompressionService();
         $res = $service->compressToTarget($src, $out, $targetBytes, 'smallest');
@@ -142,6 +144,9 @@ class ImageCompressionFunctionalTest extends TestCase
             }
         }
         $this->assertTrue($hasDimensionAttempt, "Expected dimension downscaling attempts for aggressive target size.");
+        $this->assertTrue($res['dimension_changed']);
+        $this->assertLessThan(1200, $res['dimensions']['width']);
+        $this->assertLessThan(900, $res['dimensions']['height']);
     }
 
     public function test_target_size_compression_truthfully_reports_unachievable_target(): void
