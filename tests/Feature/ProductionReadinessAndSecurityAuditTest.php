@@ -15,6 +15,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
+use Livewire\Mechanisms\FrontendAssets\FrontendAssets;
 use Tests\TestCase;
 
 class ProductionReadinessAndSecurityAuditTest extends TestCase
@@ -227,5 +228,58 @@ class ProductionReadinessAndSecurityAuditTest extends TestCase
         // Max downloads is 2
         $this->assertEquals(2, $dbRecord->max_downloads);
         $this->assertEquals(0, $dbRecord->download_count);
+    }
+
+    /**
+     * Requirement: Livewire dynamic asset routes resolve correctly and return valid JavaScript.
+     */
+    public function test_livewire_dynamic_asset_routes_resolve_and_return_javascript(): void
+    {
+        // 1. In debug mode, livewire.js is registered by default
+        $resDebug = $this->get('/livewire/livewire.js');
+        $resDebug->assertStatus(200);
+        $this->assertStringContainsString('javascript', strtolower($resDebug->headers->get('Content-Type')));
+
+        // 2. Register and verify the minified route (/livewire/livewire.min.js) used in production
+        Route::get('/livewire/livewire.min.js', [FrontendAssets::class, 'returnJavaScriptAsFile']);
+
+        $resMin = $this->get('/livewire/livewire.min.js');
+        $resMin->assertStatus(200);
+        $this->assertStringContainsString('javascript', strtolower($resMin->headers->get('Content-Type')));
+
+        // 3. Cache-busting query strings with arbitrary hashes (e.g. ?id=516a241e) must resolve 200
+        $resQuery = $this->get('/livewire/livewire.min.js?id=516a241e&v=3.5');
+        $resQuery->assertStatus(200);
+        $this->assertStringContainsString('javascript', strtolower($resQuery->headers->get('Content-Type')));
+
+        // 4. Source maps endpoint resolves 200
+        $resMap = $this->get('/livewire/livewire.min.js.map');
+        $resMap->assertStatus(200);
+    }
+
+    /**
+     * Requirement: Nginx configuration uses preferential prefix matching (^~) for /livewire/
+     * to prevent static regex from intercepting dynamic JS, preview, and upload endpoints.
+     */
+    public function test_nginx_configuration_has_livewire_preferential_prefix_rule(): void
+    {
+        $nginxConfPath = base_path('docker/nginx/default.conf');
+        $this->assertFileExists($nginxConfPath);
+        $content = file_get_contents($nginxConfPath);
+
+        // 1. Verify preferential prefix match ^~ is defined for /livewire/
+        $this->assertMatchesRegularExpression('/location\s+\^~\s+\/livewire\/\s*\{/', $content);
+
+        // 2. Verify /livewire/ delegates to Laravel via index.php
+        $this->assertStringContainsString('try_files $uri $uri/ /index.php?$query_string;', $content);
+
+        // 3. Verify static asset caching regex is preserved with try_files =404
+        $this->assertMatchesRegularExpression('/location\s+~\*\s+\\\.\(ico\|css\|js\|/', $content);
+        $this->assertStringContainsString('expires 30d;', $content);
+        $this->assertStringContainsString('add_header Cache-Control "public, immutable";', $content);
+        $this->assertStringContainsString('try_files $uri =404;', $content);
+
+        // 4. Verify client upload size limit is 100M
+        $this->assertStringContainsString('client_max_body_size 100M;', $content);
     }
 }
