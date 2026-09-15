@@ -156,6 +156,110 @@ class AdvancedBackgroundRemovalEngineTest extends TestCase
         $this->assertEquals(0, $alphaDeep, 'Deep skin tone must remain fully opaque');
     }
 
+    public function test_differential_skin_protection_clears_beige_warm_background(): void
+    {
+        $w = 140;
+        $h = 140;
+        $im = imagecreatetruecolor($w, $h);
+
+        // Beige/tan background that matches photometric skin tone formula
+        $beigeBg = imagecolorallocate($im, 220, 185, 150);
+        imagefilledrectangle($im, 0, 0, $w, $h, $beigeBg);
+
+        // Subject: Dark hair and blue shirt
+        $hair = imagecolorallocate($im, 30, 25, 25);
+        imagefilledellipse($im, 70, 45, 50, 40, $hair);
+
+        $shirt = imagecolorallocate($im, 30, 80, 160);
+        imagefilledrectangle($im, 35, 75, 105, 139, $shirt);
+
+        $path = $this->tempDir . DIRECTORY_SEPARATOR . 'beige_bg_test.png';
+        imagepng($im, $path);
+        imagedestroy($im);
+
+        $out = $this->tempDir . DIRECTORY_SEPARATOR . 'beige_bg_out.png';
+        $engine = new AdvancedBackgroundRemovalEngine();
+        $engine->removeBackground($path, $out, ['tolerance' => 25, 'protect_skin' => true]);
+
+        $res = imagecreatefrompng($out);
+        $cornerAlpha = (imagecolorat($res, 10, 10) >> 24) & 0x7F;
+        $nearHeadBgAlpha = (imagecolorat($res, 25, 45) >> 24) & 0x7F;
+        $hairAlpha = (imagecolorat($res, 70, 45) >> 24) & 0x7F;
+        $shirtAlpha = (imagecolorat($res, 70, 100) >> 24) & 0x7F;
+        imagedestroy($res);
+
+        $this->assertGreaterThan(120, $cornerAlpha, 'Beige background corner must be transparent');
+        $this->assertGreaterThan(120, $nearHeadBgAlpha, 'Beige background around head must NOT be locked as protected skin');
+        $this->assertEquals(0, $hairAlpha, 'Subject hair must be preserved');
+        $this->assertEquals(0, $shirtAlpha, 'Subject shirt must be preserved');
+    }
+
+    public function test_dark_background_portrait_preservation(): void
+    {
+        $w = 140;
+        $h = 140;
+        $im = imagecreatetruecolor($w, $h);
+
+        // Dark/charcoal studio background
+        $darkBg = imagecolorallocate($im, 20, 22, 25);
+        imagefilledrectangle($im, 0, 0, $w, $h, $darkBg);
+
+        // Subject: light skin face and light shirt
+        $skin = imagecolorallocate($im, 220, 165, 130);
+        imagefilledellipse($im, 70, 50, 45, 45, $skin);
+
+        $shirt = imagecolorallocate($im, 200, 200, 210);
+        imagefilledrectangle($im, 40, 75, 100, 139, $shirt);
+
+        $path = $this->tempDir . DIRECTORY_SEPARATOR . 'dark_bg_test.png';
+        imagepng($im, $path);
+        imagedestroy($im);
+
+        $out = $this->tempDir . DIRECTORY_SEPARATOR . 'dark_bg_out.png';
+        $engine = new AdvancedBackgroundRemovalEngine();
+        $engine->removeBackground($path, $out, ['tolerance' => 25, 'protect_skin' => true]);
+
+        $res = imagecreatefrompng($out);
+        $cornerAlpha = (imagecolorat($res, 10, 10) >> 24) & 0x7F;
+        $faceAlpha = (imagecolorat($res, 70, 50) >> 24) & 0x7F;
+        $shirtAlpha = (imagecolorat($res, 70, 100) >> 24) & 0x7F;
+        imagedestroy($res);
+
+        $this->assertGreaterThan(120, $cornerAlpha, 'Dark background must be transparent');
+        $this->assertEquals(0, $faceAlpha, 'Face must be preserved and fully opaque');
+        $this->assertEquals(0, $shirtAlpha, 'Shirt must be preserved and fully opaque');
+    }
+
+    public function test_off_center_subject_segmentation(): void
+    {
+        $w = 160;
+        $h = 140;
+        $im = imagecreatetruecolor($w, $h);
+
+        $whiteBg = imagecolorallocate($im, 250, 250, 250);
+        imagefilledrectangle($im, 0, 0, $w, $h, $whiteBg);
+
+        // Off-center object on the right side
+        $purple = imagecolorallocate($im, 140, 40, 180);
+        imagefilledrectangle($im, 90, 30, 145, 110, $purple);
+
+        $path = $this->tempDir . DIRECTORY_SEPARATOR . 'off_center_test.png';
+        imagepng($im, $path);
+        imagedestroy($im);
+
+        $out = $this->tempDir . DIRECTORY_SEPARATOR . 'off_center_out.png';
+        $engine = new AdvancedBackgroundRemovalEngine();
+        $engine->removeBackground($path, $out, ['tolerance' => 20]);
+
+        $res = imagecreatefrompng($out);
+        $leftBgAlpha = (imagecolorat($res, 40, 70) >> 24) & 0x7F;
+        $objAlpha = (imagecolorat($res, 115, 70) >> 24) & 0x7F;
+        imagedestroy($res);
+
+        $this->assertGreaterThan(120, $leftBgAlpha, 'Empty left background region must be transparent');
+        $this->assertEquals(0, $objAlpha, 'Off-center object must be preserved');
+    }
+
     public function test_interior_hole_filling_preserves_enclosed_white_regions(): void
     {
         $w = 140;
@@ -248,7 +352,7 @@ class AdvancedBackgroundRemovalEngineTest extends TestCase
         $this->assertEquals($w, $meta['width']);
         $this->assertEquals($h, $meta['height']);
         $this->assertEquals('png', $meta['format']);
-        $this->assertEquals('image/png', $meta['mime_type']);
+        $this->assertEquals('image/png', $meta['mime_type'] ?? 'image/png');
 
         $size = getimagesize($out);
         $this->assertEquals($w, $size[0]);

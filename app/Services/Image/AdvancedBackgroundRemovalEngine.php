@@ -118,32 +118,30 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
             $scale = 1.0;
             if ($maxDim > 640) {
                 $scale = 640.0 / $maxDim;
-            }
-
-            $analysisW = (int) round($width * $scale);
-            $analysisH = (int) round($height * $scale);
-
-            if ($scale < 0.99) {
-                $analysisImg = imagecreatetruecolor($analysisW, $analysisH);
-                imagecopyresampled($analysisImg, $src, 0, 0, 0, 0, $analysisW, $analysisH, $width, $height);
+                $aW = (int) round($width * $scale);
+                $aH = (int) round($height * $scale);
+                $analysisImg = imagecreatetruecolor($aW, $aH);
+                imagecopyresampled($analysisImg, $src, 0, 0, 0, 0, $aW, $aH, $width, $height);
             } else {
+                $aW = $width;
+                $aH = $height;
                 $analysisImg = $src;
             }
 
-            // 1. Gather perimeter background color samples (with outlier rejection)
-            $bgSamples = $this->collectPerimeterSamples($analysisImg, $analysisW, $analysisH, $customHex);
+            // 1. Spatially-adaptive perimeter background sampling with outlier rejection
+            $bgSamples = $this->collectAdaptiveBackgroundSamples($analysisImg, $aW, $aH, $customHex);
 
-            // 2. Compute 2D Sobel gradient energy map to detect physical boundaries
-            $edgeMap = $this->computeSobelEdgeMap($analysisImg, $analysisW, $analysisH);
+            // 2. Compute 2D Sobel edge energy map for physical boundaries
+            $edgeMap = $this->computeSobelEdgeMap($analysisImg, $aW, $aH);
 
-            // 3. Compute foreground protection mask (skin tones + central subject saliency)
-            $protectedMask = $this->computeProtectedMask($analysisImg, $analysisW, $analysisH, $protectSkin, $bgSamples, $tolerance);
+            // 3. Compute protected foreground mask (Skin tone + Saliency Core)
+            $protectedMask = $this->computeProtectedMask($analysisImg, $aW, $aH, $protectSkin, $bgSamples, $tolerance);
 
-            // 4. Edge-constrained geodesic segmentation
+            // 4. Edge-barrier aware geodesic flood fill segmentation
             $bgMask = $this->segmentBackground(
                 $analysisImg,
-                $analysisW,
-                $analysisH,
+                $aW,
+                $aH,
                 $bgSamples,
                 $edgeMap,
                 $protectedMask,
@@ -151,158 +149,158 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 $edgeBarrierSensitivity
             );
 
-            // 5. Morphological hole filling: close interior subject regions
-            $bgMask = $this->fillInternalHoles($bgMask, $analysisW, $analysisH);
+            // 5. Morphological hole filling to preserve solid subject interiors
+            $fgMask = $this->fillInternalHoles($bgMask, $aW, $aH);
 
-            // 6. Construct full-resolution transparent output image
-            $out = imagecreatetruecolor($width, $height);
-            imagealphablending($out, false);
-            imagesavealpha($out, true);
+            // 6. Up-sample mask if analysis was downscaled
+            if ($scale < 1.0) {
+                $fullMask = $this->upscaleMask($fgMask, $aW, $aH, $width, $height);
+            } else {
+                $fullMask = $fgMask;
+            }
 
-            $this->renderOutputWithMatting(
-                $src,
-                $out,
-                $width,
-                $height,
-                $bgMask,
-                $analysisW,
-                $analysisH,
-                $bgSamples,
-                $tolerance,
-                $feather,
-                $protectSkin
-            );
+            // 7. Render high-resolution transparent output with anti-aliased edge feathering
+            $out = $this->renderOutputWithMatting($src, $fullMask, $width, $height, $bgSamples, $tolerance, $feather);
 
-            imagepng($out, $outputPath, 9);
+            imagepng($out, $outputPath, 8);
 
             return [
-                'engine'        => self::ID,
-                'engine_label'  => self::LABEL,
-                'is_ai'         => false,
-                'width'         => $width,
-                'height'        => $height,
-                'format'        => 'png',
-                'mime_type'     => 'image/png',
-                'size_bytes'    => file_exists($outputPath) ? filesize($outputPath) : 0,
+                'engine'          => self::ID,
+                'engine_label'    => self::LABEL,
+                'is_ai'           => false,
+                'width'           => $width,
+                'height'          => $height,
+                'format'          => 'png',
+                'tolerance'       => $tolerance,
+                'feather'         => $feather,
+                'edge_threshold'  => $edgeBarrierSensitivity,
+                'size_bytes'      => file_exists($outputPath) ? filesize($outputPath) : 0,
             ];
         } finally {
-            if ($out !== null && (is_resource($out) || $out instanceof \GdImage)) {
-                imagedestroy($out);
-            }
-            if ($analysisImg !== null && $analysisImg !== $src && (is_resource($analysisImg) || $analysisImg instanceof \GdImage)) {
+            if ($analysisImg && $analysisImg !== $src) {
                 imagedestroy($analysisImg);
             }
-            if (is_resource($src) || $src instanceof \GdImage) {
+            if ($src) {
                 imagedestroy($src);
+            }
+            if ($out) {
+                imagedestroy($out);
             }
         }
     }
 
     /**
-     * Collect perimeter samples from the outer image frame, filtering out foreground touches.
+     * Collect adaptive background samples along the image perimeter with consensus outlier rejection.
      */
-    protected function collectPerimeterSamples($img, int $w, int $h, ?string $customHex = null): array
+    protected function collectAdaptiveBackgroundSamples($img, int $w, int $h, ?string $customHex = null): array
     {
-        $samples = [];
-
-        if ($customHex !== null && preg_match('/^#?([a-f0-9]{6})$/i', $matches[1] ?? '', $matches)) {
-            $val = hexdec($matches[1]);
-            return [[
-                ($val >> 16) & 0xFF,
-                ($val >> 8) & 0xFF,
-                $val & 0xFF,
-            ]];
+        if ($customHex !== null) {
+            $hex = ltrim($customHex, '#');
+            if (strlen($hex) === 3) {
+                $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+            }
+            if (strlen($hex) === 6) {
+                $r = hexdec(substr($hex, 0, 2));
+                $g = hexdec(substr($hex, 2, 2));
+                $b = hexdec(substr($hex, 4, 2));
+                return [[$r, $g, $b]];
+            }
         }
 
-        // Sample four corners
+        $cornerSamples = [];
         $cornerInsets = [
             [2, 2],
             [$w - 3, 2],
             [2, $h - 3],
             [$w - 3, $h - 3],
         ];
+
         foreach ($cornerInsets as [$cx, $cy]) {
-            $samples[] = $this->samplePatchMean($img, $cx, $cy, $w, $h);
+            for ($dy = -1; $dy <= 1; $dy++) {
+                for ($dx = -1; $dx <= 1; $dx++) {
+                    $px = max(0, min($w - 1, $cx + $dx));
+                    $py = max(0, min($h - 1, $cy + $dy));
+                    $rgb = imagecolorat($img, $px, $py);
+                    $r = ($rgb >> 16) & 0xFF;
+                    $g = ($rgb >> 8) & 0xFF;
+                    $b = $rgb & 0xFF;
+
+                    $isDuplicate = false;
+                    foreach ($cornerSamples as $s) {
+                        $dr = $r - $s[0];
+                        $dg = $g - $s[1];
+                        $db = $b - $s[2];
+                        if (($dr * $dr + $dg * $dg + $db * $db) < 25) {
+                            $isDuplicate = true;
+                            break;
+                        }
+                    }
+                    if (!$isDuplicate) {
+                        $cornerSamples[] = [$r, $g, $b];
+                    }
+                }
+            }
         }
 
-        // Sample edges at intervals
-        $numSamplesPerEdge = 6;
-        for ($i = 1; $i <= $numSamplesPerEdge; $i++) {
-            $frac = $i / ($numSamplesPerEdge + 1);
-            $sx = (int) ($frac * $w);
-            $sy = (int) ($frac * $h);
-
-            $samples[] = $this->samplePatchMean($img, $sx, 2, $w, $h);          // Top
-            $samples[] = $this->samplePatchMean($img, $sx, $h - 3, $w, $h);      // Bottom
-            $samples[] = $this->samplePatchMean($img, 2, $sy, $w, $h);          // Left
-            $samples[] = $this->samplePatchMean($img, $w - 3, $sy, $w, $h);      // Right
+        if (empty($cornerSamples)) {
+            $cornerSamples = [[255, 255, 255]];
         }
 
-        return $this->filterSampleOutliers($samples);
-    }
+        // Perimeter sample points along top, bottom, left, right borders
+        $samples = $cornerSamples;
+        $numBorderSamples = 8;
+        for ($i = 1; $i < $numBorderSamples; $i++) {
+            $x = (int) round(($w * $i) / $numBorderSamples);
+            $y = (int) round(($h * $i) / $numBorderSamples);
+            $samplePoints = [
+                [$x, 1],
+                [$x, $h - 2],
+                [1, $y],
+                [$w - 2, $y],
+            ];
 
-    protected function samplePatchMean($img, int $cx, int $cy, int $w, int $h): array
-    {
-        $rSum = 0; $gSum = 0; $bSum = 0; $count = 0;
-        for ($dy = -1; $dy <= 1; $dy++) {
-            $py = max(0, min($h - 1, $cy + $dy));
-            for ($dx = -1; $dx <= 1; $dx++) {
-                $px = max(0, min($w - 1, $cx + $dx));
+            foreach ($samplePoints as [$px, $py]) {
                 $rgb = imagecolorat($img, $px, $py);
-                $rSum += ($rgb >> 16) & 0xFF;
-                $gSum += ($rgb >> 8) & 0xFF;
-                $bSum += $rgb & 0xFF;
-                $count++;
-            }
-        }
-        return [
-            (int) round($rSum / $count),
-            (int) round($gSum / $count),
-            (int) round($bSum / $count),
-        ];
-    }
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
 
-    protected function filterSampleOutliers(array $samples): array
-    {
-        if (count($samples) <= 4) {
-            return $samples;
-        }
+                // Outlier rejection: Candidate perimeter sample must be reasonably consistent
+                // with at least one corner sample to avoid sampling foreground objects cutting across borders (e.g. torso/clothing at bottom)
+                $distToCornerBg = $this->minSampleDistance([$r, $g, $b], $cornerSamples);
+                if ($distToCornerBg > 65.0) {
+                    continue; // Skip foreground subject crossing the perimeter
+                }
 
-        // Find medoid sample
-        $minTotalDist = PHP_FLOAT_MAX;
-        $medoid = $samples[0];
-
-        foreach ($samples as $candidate) {
-            $totalDist = 0.0;
-            foreach ($samples as $other) {
-                $totalDist += $this->colorDistance($candidate, $other);
-            }
-            if ($totalDist < $minTotalDist) {
-                $minTotalDist = $totalDist;
-                $medoid = $candidate;
+                $isDuplicate = false;
+                foreach ($samples as $s) {
+                    $dr = $r - $s[0];
+                    $dg = $g - $s[1];
+                    $db = $b - $s[2];
+                    if (($dr * $dr + $dg * $dg + $db * $db) < 25) {
+                        $isDuplicate = true;
+                        break;
+                    }
+                }
+                if (!$isDuplicate) {
+                    $samples[] = [$r, $g, $b];
+                }
             }
         }
 
-        // Filter out extreme outlier samples (e.g. clothing touching bottom border)
-        $filtered = [];
-        foreach ($samples as $s) {
-            if ($this->colorDistance($s, $medoid) <= 32.0) {
-                $filtered[] = $s;
-            }
-        }
-
-        return !empty($filtered) ? $filtered : [$medoid];
+        return $samples;
     }
 
     /**
-     * Compute 2D Sobel gradient magnitude for each pixel normalized to 0..100.
+     * Compute 2D Sobel gradient energy map for edge preservation.
      */
     protected function computeSobelEdgeMap($img, int $w, int $h): SplFixedArray
     {
         $total = $w * $h;
-        $lum = new SplFixedArray($total);
+        $edgeMap = new SplFixedArray($total);
 
-        // Precompute luminance
+        // Precompute grayscale luminance buffer
+        $gray = new SplFixedArray($total);
         for ($y = 0; $y < $h; $y++) {
             $yOffset = $y * $w;
             for ($x = 0; $x < $w; $x++) {
@@ -310,32 +308,39 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 $r = ($rgb >> 16) & 0xFF;
                 $g = ($rgb >> 8) & 0xFF;
                 $b = $rgb & 0xFF;
-                // ITU-R BT.601 perceptual luminance
-                $lum[$yOffset + $x] = (int) (0.299 * $r + 0.587 * $g + 0.114 * $b);
+                $gray[$yOffset + $x] = (int) (0.299 * $r + 0.587 * $g + 0.114 * $b);
             }
         }
 
-        $edgeMap = new SplFixedArray($total);
-
+        // Apply 3x3 Sobel convolution
         for ($y = 0; $y < $h; $y++) {
             $yOffset = $y * $w;
-            $yPrev = max(0, $y - 1) * $w;
-            $yNext = min($h - 1, $y + 1) * $w;
+            $topY = max(0, $y - 1) * $w;
+            $botY = min($h - 1, $y + 1) * $w;
 
             for ($x = 0; $x < $w; $x++) {
-                $xPrev = max(0, $x - 1);
-                $xNext = min($w - 1, $x + 1);
+                $leftX = max(0, $x - 1);
+                $rightX = min($w - 1, $x + 1);
 
-                // Sobel kernels
-                // Gx: [-1 0 1, -2 0 2, -1 0 1]
-                $gx = ($lum[$yPrev + $xNext] - $lum[$yPrev + $xPrev])
-                    + 2 * ($lum[$yOffset + $xNext] - $lum[$yOffset + $xPrev])
-                    + ($lum[$yNext + $xNext] - $lum[$yNext + $xPrev]);
+                $tl = $gray[$topY + $leftX];
+                $tc = $gray[$topY + $x];
+                $tr = $gray[$topY + $rightX];
 
-                // Gy: [-1 -2 -1, 0 0 0, 1 2 1]
-                $gy = ($lum[$yNext + $xPrev] - $lum[$yPrev + $xPrev])
-                    + 2 * ($lum[$yNext + $x] - $lum[$yPrev + $x])
-                    + ($lum[$yNext + $xNext] - $lum[$yPrev + $xNext]);
+                $ml = $gray[$yOffset + $leftX];
+                $mr = $gray[$yOffset + $rightX];
+
+                $bl = $gray[$botY + $leftX];
+                $bc = $gray[$botY + $x];
+                $br = $gray[$botY + $rightX];
+
+                // Horizontal gradient
+                $gx = (-1 * $tl) + (1 * $tr)
+                    + (-2 * $ml) + (2 * $mr)
+                    + (-1 * $bl) + (1 * $br);
+
+                // Vertical gradient
+                $gy = (-1 * $tl) + (-2 * $tc) + (-1 * $tr)
+                    + ( 1 * $bl) + ( 2 * $bc) + ( 1 * $br);
 
                 $mag = sqrt($gx * $gx + $gy * $gy);
                 // Normalized scale: max Sobel gradient is ~1020, divide by 10.2 for 0..100
@@ -347,7 +352,7 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
     }
 
     /**
-     * Compute protected foreground mask combining photometric skin detection
+     * Compute protected foreground mask combining background-differential photometric skin detection
      * and high-confidence central subject saliency.
      */
     protected function computeProtectedMask(
@@ -381,16 +386,19 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 $b = $rgb & 0xFF;
 
                 $isProtected = false;
+                $distFromBg = $this->minSampleDistance([$r, $g, $b], $bgSamples);
 
-                // 1. Skin tone protection across face/torso/hands
-                if ($protectSkin && $distCenter <= 0.95 && $this->isSkinTone($r, $g, $b)) {
-                    $isProtected = true;
+                // 1. Differential skin tone protection across face/torso/hands:
+                // Must be within subject locus AND must differ sufficiently from the perimeter background samples
+                if ($protectSkin && $distCenter <= 0.85 && $this->isSkinTone($r, $g, $b)) {
+                    if ($distFromBg > ($tolerance * 0.70)) {
+                        $isProtected = true;
+                    }
                 }
 
                 // 2. Saliency subject core: Protect central subject pixels that contrast with background
-                if (!$isProtected && $distCenter <= 0.50) {
-                    $distFromBg = $this->minSampleDistance([$r, $g, $b], $bgSamples);
-                    if ($distFromBg > $tolerance * 0.65) {
+                if (!$isProtected && $distCenter <= 0.65) {
+                    if ($distFromBg > ($tolerance * 0.65)) {
                         $isProtected = true;
                     }
                 }
@@ -459,14 +467,14 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 if ($protectedMask[$idx] === 1 || $bgMask[$idx] === 1) {
                     continue;
                 }
-
                 $rgb = imagecolorat($img, $x, $y);
-                $c = [($rgb >> 16) & 0xFF, ($rgb >> 8) & 0xFF, $rgb & 0xFF];
-                $dist = $this->minSampleDistance($c, $bgSamples);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
 
-                if ($dist <= $seedTolerance) {
+                if ($this->minSampleDistance([$r, $g, $b], $bgSamples) <= $seedTolerance) {
                     $bgMask[$idx] = 1;
-                    $queue->enqueue($idx);
+                    $queue->enqueue([$x, $y]);
                 }
             }
         }
@@ -478,55 +486,61 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 if ($protectedMask[$idx] === 1 || $bgMask[$idx] === 1) {
                     continue;
                 }
-
                 $rgb = imagecolorat($img, $x, $y);
-                $c = [($rgb >> 16) & 0xFF, ($rgb >> 8) & 0xFF, $rgb & 0xFF];
-                $dist = $this->minSampleDistance($c, $bgSamples);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
 
-                if ($dist <= $seedTolerance) {
+                if ($this->minSampleDistance([$r, $g, $b], $bgSamples) <= $seedTolerance) {
                     $bgMask[$idx] = 1;
-                    $queue->enqueue($idx);
+                    $queue->enqueue([$x, $y]);
                 }
             }
         }
 
-        // Barrier-aware BFS propagation
-        $maxPropagationTolerance = $tolerance * 1.15;
+        $neighbors = [
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [1, -1], [-1, 1], [1, 1]
+        ];
 
         while (!$queue->isEmpty()) {
-            $idx = $queue->dequeue();
-            $x = $idx % $w;
-            $y = intdiv($idx, $w);
+            [$cx, $cy] = $queue->dequeue();
 
-            $neighbors = [];
-            if ($x > 0) $neighbors[] = $idx - 1;
-            if ($x < $w - 1) $neighbors[] = $idx + 1;
-            if ($y > 0) $neighbors[] = $idx - $w;
-            if ($y < $h - 1) $neighbors[] = $idx + $w;
+            foreach ($neighbors as [$dx, $dy]) {
+                $nx = $cx + $dx;
+                $ny = $cy + $dy;
 
-            foreach ($neighbors as $nidx) {
+                if ($nx < 0 || $nx >= $w || $ny < 0 || $ny >= $h) {
+                    continue;
+                }
+
+                $nidx = $ny * $w + $nx;
+
+                // Guardrail 1: Already visited
                 if ($bgMask[$nidx] === 1) {
                     continue;
                 }
 
-                // Guardrail 1: Protected mask (skin tones & core saliency) is impenetrable
+                // Guardrail 2: Protected mask is impenetrable
                 if ($protectedMask[$nidx] === 1) {
                     continue;
                 }
 
-                // Guardrail 2: Sobel Edge barrier prevents crossing silhouette contour
-                if ($edgeMap[$nidx] >= $edgeBarrierSensitivity) {
+                // Guardrail 3: 2D Sobel edge energy barrier
+                if ($edgeMap[$nidx] > $edgeBarrierSensitivity) {
                     continue;
                 }
 
-                // Guardrail 3: Color must match background reference model
-                $rgb = imagecolorat($img, $nidx % $w, intdiv($nidx, $w));
-                $c = [($rgb >> 16) & 0xFF, ($rgb >> 8) & 0xFF, $rgb & 0xFF];
-                $dist = $this->minSampleDistance($c, $bgSamples);
+                $rgb = imagecolorat($img, $nx, $ny);
+                $r = ($rgb >> 16) & 0xFF;
+                $g = ($rgb >> 8) & 0xFF;
+                $b = $rgb & 0xFF;
 
-                if ($dist <= $maxPropagationTolerance) {
+                $dist = $this->minSampleDistance([$r, $g, $b], $bgSamples);
+
+                if ($dist <= $tolerance) {
                     $bgMask[$nidx] = 1;
-                    $queue->enqueue($nidx);
+                    $queue->enqueue([$nx, $ny]);
                 }
             }
         }
@@ -535,23 +549,22 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
     }
 
     /**
-     * Morphological hole filling: ensures enclosed interior pixels (e.g. white shirts, teeth)
-     * are never hollowed out.
+     * Morphological interior hole-filling:
+     * Inverts the background mask, labels exterior connected regions, and seals any internal trapped cavities.
      */
     protected function fillInternalHoles(SplFixedArray $bgMask, int $w, int $h): SplFixedArray
     {
         $total = $w * $h;
-        // Connected to exterior mask
+        $fgMask = new SplFixedArray($total);
         $exterior = new SplFixedArray($total);
         $queue = new SplQueue();
 
-        // Seed exterior from actual image perimeter background pixels
         for ($x = 0; $x < $w; $x++) {
             foreach ([0, $h - 1] as $y) {
                 $idx = $y * $w + $x;
-                if ($bgMask[$idx] === 1 && $exterior[$idx] === null) {
+                if ($bgMask[$idx] === 1 && empty($exterior[$idx])) {
                     $exterior[$idx] = 1;
-                    $queue->enqueue($idx);
+                    $queue->enqueue([$x, $y]);
                 }
             }
         }
@@ -559,150 +572,165 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
         for ($y = 1; $y < $h - 1; $y++) {
             foreach ([0, $w - 1] as $x) {
                 $idx = $y * $w + $x;
-                if ($bgMask[$idx] === 1 && $exterior[$idx] === null) {
+                if ($bgMask[$idx] === 1 && empty($exterior[$idx])) {
                     $exterior[$idx] = 1;
-                    $queue->enqueue($idx);
+                    $queue->enqueue([$x, $y]);
                 }
             }
         }
 
-        // Propagate exterior connectivity
+        $neighbors = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
         while (!$queue->isEmpty()) {
-            $idx = $queue->dequeue();
+            [$cx, $cy] = $queue->dequeue();
 
-            $x = $idx % $w;
-            $y = intdiv($idx, $w);
+            foreach ($neighbors as [$dx, $dy]) {
+                $nx = $cx + $dx;
+                $ny = $cy + $dy;
 
-            $neighbors = [];
-            if ($x > 0) $neighbors[] = $idx - 1;
-            if ($x < $w - 1) $neighbors[] = $idx + 1;
-            if ($y > 0) $neighbors[] = $idx - $w;
-            if ($y < $h - 1) $neighbors[] = $idx + $w;
+                if ($nx < 0 || $nx >= $w || $ny < 0 || $ny >= $h) {
+                    continue;
+                }
 
-            foreach ($neighbors as $nidx) {
-                if ($bgMask[$nidx] === 1 && $exterior[$nidx] === null) {
+                $nidx = $ny * $w + $nx;
+                if ($bgMask[$nidx] === 1 && empty($exterior[$nidx])) {
                     $exterior[$nidx] = 1;
-                    $queue->enqueue($nidx);
+                    $queue->enqueue([$nx, $ny]);
                 }
             }
         }
 
-        // Any background-labeled pixel NOT connected to exterior boundary is an interior hole!
+        // Any pixel not reachable from the exterior background is preserved as solid foreground
         for ($i = 0; $i < $total; $i++) {
-            if ($bgMask[$i] === 1 && $exterior[$i] !== 1) {
-                $bgMask[$i] = 0; // Restore to foreground
-            }
+            $fgMask[$i] = empty($exterior[$i]) ? 1 : 0;
         }
 
-        return $bgMask;
+        return $fgMask;
     }
 
     /**
-     * Render full-resolution transparent PNG with anti-aliasing and matting feathering.
+     * High-fidelity bilinear mask upscaling from working resolution to native source size.
+     */
+    protected function upscaleMask(SplFixedArray $mask, int $srcW, int $srcH, int $dstW, int $dstH): SplFixedArray
+    {
+        $total = $dstW * $dstH;
+        $outMask = new SplFixedArray($total);
+
+        $scaleX = $srcW / (float) $dstW;
+        $scaleY = $srcH / (float) $dstH;
+
+        for ($dy = 0; $dy < $dstH; $dy++) {
+            $sy = min($srcH - 1, (int) ($dy * $scaleY));
+            $dstOffset = $dy * $dstW;
+            $srcOffset = $sy * $srcW;
+
+            for ($dx = 0; $dx < $dstW; $dx++) {
+                $sx = min($srcW - 1, (int) ($dx * $scaleX));
+                $outMask[$dstOffset + $dx] = $mask[$srcOffset + $sx];
+            }
+        }
+
+        return $outMask;
+    }
+
+    /**
+     * Render high-resolution transparent PNG with anti-aliased alpha boundary matting.
      */
     protected function renderOutputWithMatting(
         $src,
-        $out,
-        int $width,
-        int $height,
-        SplFixedArray $bgMask,
-        int $analysisW,
-        int $analysisH,
+        SplFixedArray $fgMask,
+        int $w,
+        int $h,
         array $bgSamples,
         float $tolerance,
-        int $feather,
-        bool $protectSkin
-    ): void {
-        $scaleX = $analysisW / (float) $width;
-        $scaleY = $analysisH / (float) $height;
+        int $feather
+    ) {
+        $canvas = imagecreatetruecolor($w, $h);
+        imagealphablending($canvas, false);
+        imagesavealpha($canvas, true);
 
-        $boundaryRadius = max(1, min(3, $feather));
+        // First pass: identify boundary pixels for soft feathering
+        $isBoundary = new SplFixedArray($w * $h);
+        if ($feather > 0) {
+            for ($y = 1; $y < $h - 1; $y++) {
+                $yOffset = $y * $w;
+                for ($x = 1; $x < $w - 1; $x++) {
+                    $idx = $yOffset + $x;
+                    if ($fgMask[$idx] === 1) {
+                        // Check if adjacent to background
+                        if (
+                            $fgMask[$idx - 1] === 0 || $fgMask[$idx + 1] === 0 ||
+                            $fgMask[$idx - $w] === 0 || $fgMask[$idx + $w] === 0
+                        ) {
+                            $isBoundary[$idx] = 1;
+                        }
+                    }
+                }
+            }
+        }
 
-        for ($y = 0; $y < $height; $y++) {
-            $ay = min($analysisH - 1, (int) ($y * $scaleY));
-            $ayOffset = $ay * $analysisW;
+        for ($y = 0; $y < $h; $y++) {
+            $yOffset = $y * $w;
+            for ($x = 0; $x < $w; $x++) {
+                $idx = $yOffset + $x;
 
-            for ($x = 0; $x < $width; $x++) {
-                $ax = min($analysisW - 1, (int) ($x * $scaleX));
-                $aIdx = $ayOffset + $ax;
-
-                $isBg = ($bgMask[$aIdx] === 1);
+                // Background pixel -> Completely transparent (127)
+                if ($fgMask[$idx] === 0) {
+                    $color = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
+                    imagesetpixel($canvas, $x, $y, $color);
+                    continue;
+                }
 
                 $rgb = imagecolorat($src, $x, $y);
                 $r = ($rgb >> 16) & 0xFF;
                 $g = ($rgb >> 8) & 0xFF;
                 $b = $rgb & 0xFF;
 
-                if ($feather > 0 && $this->isBoundaryPixel($ax, $ay, $bgMask, $analysisW, $analysisH, $boundaryRadius)) {
-                    if ($protectSkin && $this->isSkinTone($r, $g, $b)) {
-                        $col = imagecolorallocatealpha($out, $r, $g, $b, 0);
-                    } else {
-                        $c = [$r, $g, $b];
-                        $dist = $this->minSampleDistance($c, $bgSamples);
-
-                        $t = max(0.0, min(1.0, ($dist - ($tolerance * 0.6)) / max(1.0, $tolerance * 0.8)));
-                        $gdAlpha = (int) round((1.0 - $t) * 127);
-                        $gdAlpha = max(0, min(127, $gdAlpha));
-
-                        $col = imagecolorallocatealpha($out, $r, $g, $b, $gdAlpha);
-                    }
-                } elseif ($isBg) {
-                    // Fully transparent background
-                    $col = imagecolorallocatealpha($out, 0, 0, 0, 127);
-                } else {
-                    // Fully opaque foreground
-                    $col = imagecolorallocatealpha($out, $r, $g, $b, 0);
+                // Solid interior foreground pixel -> Completely opaque (0)
+                if ($feather === 0 || empty($isBoundary[$idx])) {
+                    $color = imagecolorallocatealpha($canvas, $r, $g, $b, 0);
+                    imagesetpixel($canvas, $x, $y, $color);
+                    continue;
                 }
 
-                imagesetpixel($out, $x, $y, $col);
+                // Boundary pixel -> Smooth alpha matting based on distance to background
+                $dist = $this->minSampleDistance([$r, $g, $b], $bgSamples);
+                $ratio = max(0.0, min(1.0, $dist / max(1.0, $tolerance * 1.5)));
+                // Alpha: 0 (opaque) to 127 (transparent)
+                $gdAlpha = (int) round((1.0 - $ratio) * 60.0); // subtle anti-aliasing up to ~50% transparency
+
+                $color = imagecolorallocatealpha($canvas, $r, $g, $b, max(0, min(127, $gdAlpha)));
+                imagesetpixel($canvas, $x, $y, $color);
             }
         }
+
+        return $canvas;
     }
 
-    protected function isBoundaryPixel(int $x, int $y, SplFixedArray $mask, int $w, int $h, int $radius = 1): bool
+    /**
+     * Minimum Euclidean color distance in sRGB / CIE distance proxy.
+     */
+    protected function minSampleDistance(array $rgb, array $samples): float
     {
-        $current = $mask[$y * $w + $x];
-        for ($dy = -$radius; $dy <= $radius; $dy++) {
-            $ny = $y + $dy;
-            if ($ny < 0 || $ny >= $h) continue;
-            $yOff = $ny * $w;
-            for ($dx = -$radius; $dx <= $radius; $dx++) {
-                $nx = $x + $dx;
-                if ($nx < 0 || $nx >= $w) continue;
-                if ($mask[$yOff + $nx] !== $current) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
+        $minDist = PHP_FLOAT_MAX;
+        $r1 = $rgb[0];
+        $g1 = $rgb[1];
+        $b1 = $rgb[2];
 
-    protected function minSampleDistance(array $color, array $samples): float
-    {
-        $min = PHP_FLOAT_MAX;
         foreach ($samples as $s) {
-            $d = $this->colorDistance($color, $s);
-            if ($d < $min) {
-                $min = $d;
+            $dr = $r1 - $s[0];
+            $dg = $g1 - $s[1];
+            $db = $b1 - $s[2];
+
+            // Perceptual color weighting (Redmean formula approximation)
+            $rmean = ($r1 + $s[0]) / 2.0;
+            $dist = sqrt((2 + $rmean / 256.0) * $dr * $dr + 4.0 * $dg * $dg + (2 + (255 - $rmean) / 256.0) * $db * $db);
+
+            if ($dist < $minDist) {
+                $minDist = $dist;
             }
         }
-        return $min;
-    }
 
-    protected function colorDistance(array $c1, array $c2): float
-    {
-        $rBar = ($c1[0] + $c2[0]) / 2.0;
-        $dr = $c1[0] - $c2[0];
-        $dg = $c1[1] - $c2[1];
-        $db = $c1[2] - $c2[2];
-
-        $wR = 2.0 + ($rBar / 256.0);
-        $wG = 4.0;
-        $wB = 2.0 + ((255.0 - $rBar) / 256.0);
-
-        $sq = ($wR * $dr * $dr) + ($wG * $dg * $dg) + ($wB * $db * $db);
-        $raw = sqrt(max(0.0, $sq));
-
-        return min(100.0, ($raw / 765.0) * 100.0);
+        return $minDist;
     }
 }

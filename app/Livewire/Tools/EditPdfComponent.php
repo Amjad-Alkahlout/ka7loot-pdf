@@ -49,6 +49,7 @@ class EditPdfComponent extends BaseToolComponent
     public int $totalTextObjects = 0;
     public int $totalTextGroups = 0;
     public array $pageDimensions = []; // ['width' => float, 'height' => float, 'rotation' => int]
+    public array $allPageDimensionsByPage = []; // page_index => ['width' => float, 'height' => float, 'rotation' => int]
     public array $pageNativeEditable = []; // page_number (1-based) => bool
     public array $pageHasType3 = [];       // page_number (1-based) => bool
     public array $pageWarnings = [];       // page_number (1-based) => string|null
@@ -125,9 +126,10 @@ class EditPdfComponent extends BaseToolComponent
             $this->passwordRequired = false;
             $this->passwordError = null;
 
-            // Cache text objects and logical groups by page index
+            // Cache text objects, logical groups, and dimensions by page index
             $this->allTextObjectsByPage = [];
             $this->allTextGroupsByPage = [];
+            $this->allPageDimensionsByPage = [];
             $this->pageNativeEditable = [];
             $this->pageHasType3 = [];
             $this->pageWarnings = [];
@@ -138,6 +140,14 @@ class EditPdfComponent extends BaseToolComponent
                 $this->pageNativeEditable[$pageNum] = (bool) ($pData['native_editable'] ?? true);
                 $this->pageHasType3[$pageNum] = (bool) ($pData['has_type3_fonts'] ?? false);
                 $this->pageWarnings[$pageNum] = $pData['warning']['message'] ?? ($pData['editable_reason'] ?? null);
+
+                $dims = [
+                    'width'    => (float) ($pData['width'] ?? 595.28),
+                    'height'   => (float) ($pData['height'] ?? 841.89),
+                    'rotation' => (int) ($pData['rotation'] ?? 0),
+                ];
+                $this->allPageDimensionsByPage[$pIdx] = $dims;
+
                 $objs = [];
                 foreach ($pData['text_objects'] ?? [] as $to) {
                     $to['object_id'] = $to['id'] ?? ($to['object_id'] ?? null);
@@ -147,11 +157,7 @@ class EditPdfComponent extends BaseToolComponent
                 $this->allTextGroupsByPage[$pIdx] = $pData['text_groups'] ?? [];
 
                 if ($pIdx === ($this->currentPage - 1)) {
-                    $this->pageDimensions = [
-                        'width'    => $pData['width'] ?? 595.28,
-                        'height'   => $pData['height'] ?? 841.89,
-                        'rotation' => $pData['rotation'] ?? 0,
-                    ];
+                    $this->pageDimensions = $dims;
                 }
             }
 
@@ -179,7 +185,6 @@ class EditPdfComponent extends BaseToolComponent
             $this->jobStatus = 'failed';
         }
     }
-
 
     public function isCurrentPageNativeEditable(): bool
     {
@@ -245,17 +250,8 @@ class EditPdfComponent extends BaseToolComponent
         $this->editText = '';
 
         $pIdx = $page - 1;
-        if (isset($this->allTextObjectsByPage[$pIdx])) {
-            $pdfium = app(PdfiumTextEditorService::class);
-            $inspection = $pdfium->inspectDocument($this->storedSourcePath, $this->password ?: null);
-            $pageData = $inspection['pages'][$pIdx] ?? null;
-            if ($pageData) {
-                $this->pageDimensions = [
-                    'width'    => $pageData['width'] ?? 595.28,
-                    'height'   => $pageData['height'] ?? 841.89,
-                    'rotation' => $pageData['rotation'] ?? 0,
-                ];
-            }
+        if (isset($this->allPageDimensionsByPage[$pIdx])) {
+            $this->pageDimensions = $this->allPageDimensionsByPage[$pIdx];
         }
 
         $this->loadPagePreview($page);
@@ -371,6 +367,107 @@ class EditPdfComponent extends BaseToolComponent
                 }
                 $this->activeTab = 'text';
                 break;
+            }
+        }
+    }
+
+    /**
+     * Navigate to the next text block/object seamlessly.
+     */
+    public function nextTextItem(): void
+    {
+        $pIdx = $this->currentPage - 1;
+        $items = !empty($this->allTextGroupsByPage[$pIdx])
+            ? $this->allTextGroupsByPage[$pIdx]
+            : ($this->allTextObjectsByPage[$pIdx] ?? []);
+
+        if (empty($items)) {
+            if ($this->currentPage < $this->pageCount) {
+                $this->goToPage($this->currentPage + 1);
+                $this->nextTextItem();
+            }
+            return;
+        }
+
+        $currentId = $this->selectedGroupId ?? $this->selectedObjectId;
+        $currentIndex = -1;
+
+        if ($currentId !== null) {
+            foreach ($items as $idx => $item) {
+                $id = $item['group_id'] ?? ($item['object_id'] ?? ($item['id'] ?? null));
+                if ($id === $currentId) {
+                    $currentIndex = $idx;
+                    break;
+                }
+            }
+        }
+
+        $nextIndex = $currentIndex + 1;
+        if ($nextIndex < count($items)) {
+            $nextItem = $items[$nextIndex];
+            if (isset($nextItem['group_id'])) {
+                $this->selectTextGroup($nextItem['group_id']);
+            } else {
+                $this->selectTextObject($nextItem['object_id'] ?? $nextItem['id']);
+            }
+        } elseif ($this->currentPage < $this->pageCount) {
+            $this->goToPage($this->currentPage + 1);
+            $this->nextTextItem();
+        }
+    }
+
+    /**
+     * Navigate to the previous text block/object seamlessly.
+     */
+    public function prevTextItem(): void
+    {
+        $pIdx = $this->currentPage - 1;
+        $items = !empty($this->allTextGroupsByPage[$pIdx])
+            ? $this->allTextGroupsByPage[$pIdx]
+            : ($this->allTextObjectsByPage[$pIdx] ?? []);
+
+        if (empty($items)) {
+            if ($this->currentPage > 1) {
+                $this->goToPage($this->currentPage - 1);
+                $this->prevTextItem();
+            }
+            return;
+        }
+
+        $currentId = $this->selectedGroupId ?? $this->selectedObjectId;
+        $currentIndex = count($items);
+
+        if ($currentId !== null) {
+            foreach ($items as $idx => $item) {
+                $id = $item['group_id'] ?? ($item['object_id'] ?? ($item['id'] ?? null));
+                if ($id === $currentId) {
+                    $currentIndex = $idx;
+                    break;
+                }
+            }
+        }
+
+        $prevIndex = $currentIndex - 1;
+        if ($prevIndex >= 0 && $prevIndex < count($items)) {
+            $prevItem = $items[$prevIndex];
+            if (isset($prevItem['group_id'])) {
+                $this->selectTextGroup($prevItem['group_id']);
+            } else {
+                $this->selectTextObject($prevItem['object_id'] ?? $prevItem['id']);
+            }
+        } elseif ($this->currentPage > 1) {
+            $this->goToPage($this->currentPage - 1);
+            $pIdxPrev = $this->currentPage - 1;
+            $prevItems = !empty($this->allTextGroupsByPage[$pIdxPrev])
+                ? $this->allTextGroupsByPage[$pIdxPrev]
+                : ($this->allTextObjectsByPage[$pIdxPrev] ?? []);
+            if (!empty($prevItems)) {
+                $lastItem = end($prevItems);
+                if (isset($lastItem['group_id'])) {
+                    $this->selectTextGroup($lastItem['group_id']);
+                } else {
+                    $this->selectTextObject($lastItem['object_id'] ?? $lastItem['id']);
+                }
             }
         }
     }
@@ -622,6 +719,24 @@ class EditPdfComponent extends BaseToolComponent
         $this->activeTab = 'shapes';
     }
 
+    public function addShapeItem(string $type = 'rect'): void
+    {
+        $this->addShape($type);
+    }
+
+    public function updateShapeItem(string $id, array $params): void
+    {
+        if ($this->jobStatus === 'completed') {
+            $this->fileJobId = null;
+            $this->completedJob = null;
+            $this->jobStatus = 'ready';
+        }
+
+        if (isset($this->addedShapes[$id])) {
+            $this->addedShapes[$id] = array_merge($this->addedShapes[$id], $params);
+        }
+    }
+
     public function removeShape(string $id): void
     {
         if ($this->jobStatus === 'completed') {
@@ -631,6 +746,11 @@ class EditPdfComponent extends BaseToolComponent
         }
 
         unset($this->addedShapes[$id]);
+    }
+
+    public function removeShapeItem(string $id): void
+    {
+        $this->removeShape($id);
     }
 
     public function clearAllEdits(): void
@@ -645,6 +765,15 @@ class EditPdfComponent extends BaseToolComponent
             $this->completedJob = null;
             $this->jobStatus = 'ready';
         }
+    }
+
+    public function processEdits(): void
+    {
+        $this->process(
+            app(FileStorageManager::class),
+            app(PdfiumTextEditorService::class),
+            app(PdfAnnotationApplierService::class)
+        );
     }
 
     public function process(
@@ -996,7 +1125,7 @@ class EditPdfComponent extends BaseToolComponent
             'storedSourcePath', 'jobId', 'pageCount', 'currentPage',
             'isScanned', 'isSigned', 'isEncrypted', 'passwordRequired',
             'password', 'passwordError', 'totalTextObjects', 'totalTextGroups',
-            'pageDimensions', 'pagePreviews', 'pageThumbnails',
+            'pageDimensions', 'allPageDimensionsByPage', 'pagePreviews', 'pageThumbnails',
             'allTextObjectsByPage', 'allTextGroupsByPage',
             'selectedObjectId', 'selectedObject', 'selectedGroupId', 'selectedGroup',
             'editText', 'editFontSize', 'editColor', 'autoFit', 'editManifest', 'addedTexts', 'addedShapes', 'completedJob'
@@ -1014,8 +1143,8 @@ class EditPdfComponent extends BaseToolComponent
             'currentTextObjects' => $currentTextObjects,
             'currentTextGroups'  => $currentTextGroups,
         ])->layout('layouts.app', [
-            'title' => __('tools.edit_pdf.title') . ' — ' . config('app.name'),
+            'title'       => __('tools.edit_pdf.title') . ' — ' . config('app.name'),
+            'description' => __('tools.edit_pdf.desc'),
         ]);
     }
 }
-

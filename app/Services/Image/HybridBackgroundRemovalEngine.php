@@ -38,10 +38,10 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
 
     /**
      * Remove the background using the hybrid multi-tier routing architecture:
-     * 1. Detect if image is likely a human portrait.
-     * 2. If portrait and MODNet is available -> run MODNet.
-     * 3. If MODNet fails, sanity check fails, or image is non-human -> run Advanced engine.
-     * 4. If Advanced engine fails -> run ColorSampling engine.
+     * 1. Detect if image contains a human portrait (using background-invariant upper facial locus).
+     * 2. If portrait and MODNet is available -> run MODNet neural matting.
+     * 3. If MODNet fails, throws, or image is a non-human object -> run Advanced engine.
+     * 4. If Advanced engine fails -> fall back to ColorSampling engine.
      */
     public function removeBackground(string $inputPath, string $outputPath, array $options = []): array
     {
@@ -51,7 +51,7 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
 
         $isPortrait = $this->isLikelyHumanPortrait($inputPath);
 
-        // Tier 1: MODNet AI Matting (for Human Portraits)
+        // Tier 1: Local MODNet AI Matting (for Human Portraits)
         if ($isPortrait && $this->modnetEngine->isAvailable()) {
             try {
                 $meta = $this->modnetEngine->removeBackground($inputPath, $outputPath, $options);
@@ -59,7 +59,7 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
                 $meta['routing'] = 'modnet_portrait_ai';
                 return $meta;
             } catch (Throwable $e) {
-                Log::warning("MODNet AI matting failed or rejected for [{$inputPath}]: {$e->getMessage()}. Falling back to Advanced engine.");
+                Log::info("MODNet AI matting failed or rejected for [{$inputPath}]: {$e->getMessage()}. Falling back to Advanced engine.");
             }
         }
 
@@ -73,7 +73,7 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
             Log::warning("Advanced background removal failed for [{$inputPath}]: {$e->getMessage()}. Falling back to ColorSampling engine.");
         }
 
-        // Tier 3: Deterministic ColorSampling fallback
+        // Tier 3: Deterministic ColorSampling final fallback
         $meta = $this->colorSamplingEngine->removeBackground($inputPath, $outputPath, $options);
         $meta['detection'] = $isPortrait ? 'portrait_colorsampling_fallback' : 'general_colorsampling_fallback';
         $meta['routing'] = 'color_sampling_final_fallback';
@@ -81,8 +81,9 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
     }
 
     /**
-     * Fast statistical heuristic to determine whether an image is likely a human portrait.
-     * Samples a 64x64 thumbnail to analyze upper-center skin chrominance vs corner background.
+     * Statistical heuristic to determine whether an image is likely a human portrait.
+     * Samples a 64x64 thumbnail to analyze upper-center facial anatomy.
+     * Robust across diverse skin tones and background colors (including beige, warm, light, dark).
      */
     public function isLikelyHumanPortrait(string $path): bool
     {
@@ -98,9 +99,9 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
         $w = $info[0];
         $h = $info[1];
 
-        // Extreme aspect ratios (< 0.4 or > 2.5) are unlikely to be standard portraits
+        // Extreme aspect ratios (< 0.35 or > 2.5) are unlikely to be standard portraits
         $ratio = $w / max(1, $h);
-        if ($ratio < 0.4 || $ratio > 2.2) {
+        if ($ratio < 0.35 || $ratio > 2.5) {
             return false;
         }
 
@@ -121,11 +122,9 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
 
         $upperSkin = 0;
         $upperTotal = 0;
-        $cornerSkin = 0;
-        $cornerTotal = 0;
 
-        for ($y = 0; $y < 64; $y++) {
-            for ($x = 0; $x < 64; $x++) {
+        for ($y = 8; $y < 48; $y++) {
+            for ($x = 14; $x < 50; $x++) {
                 $rgb = imagecolorat($thumb, $x, $y);
                 $r = ($rgb >> 16) & 0xFF;
                 $g = ($rgb >> 8) & 0xFF;
@@ -138,29 +137,16 @@ class HybridBackgroundRemovalEngine implements BackgroundRemovalEngineInterface
                 // Broad skin locus covering diverse global human tones
                 $isSkin = ($cb >= 75 && $cb <= 135 && $cr >= 130 && $cr <= 180 && $r > $g && $g >= ($b - 5) && ($r - $g) >= 10);
 
-                // Upper center region (x: 16-48, y: 10-42) - standard facial anatomy
-                if ($x >= 16 && $x <= 48 && $y >= 10 && $y <= 42) {
-                    $upperTotal++;
-                    if ($isSkin) {
-                        $upperSkin++;
-                    }
-                }
-
-                // 4 Corners - background areas
-                if (($x < 12 || $x > 52) && ($y < 12 || $y > 52)) {
-                    $cornerTotal++;
-                    if ($isSkin) {
-                        $cornerSkin++;
-                    }
+                $upperTotal++;
+                if ($isSkin) {
+                    $upperSkin++;
                 }
             }
         }
+
         imagedestroy($thumb);
 
         $faceSkinRatio = $upperSkin / max(1, $upperTotal);
-        $cornerSkinRatio = $cornerSkin / max(1, $cornerTotal);
-
-        // Portrait requires significant facial skin presence (>=10%) and minimal corner skin (<25%)
-        return ($faceSkinRatio >= 0.10 && $cornerSkinRatio < 0.25);
+        return $faceSkinRatio >= 0.08;
     }
 }

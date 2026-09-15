@@ -75,7 +75,7 @@
                     'propertyName' => 'upload',
                     'multiple'     => false,
                     'accept'       => 'application/pdf',
-                    'maxSizeMb'    => $this->getMaxPdfSizeMb(),
+                    'maxSizeMb'    => (int)(config('fileprocessor.limits.max_pdf_size_kb', 51200) / 1024),
                     'formatsHint'  => 'PDF',
                 ])
             </div>
@@ -121,11 +121,11 @@
                 </div>
             @endif
 
-            <!-- Digitally Signed Warning -->
+            <!-- Signed Document Alert -->
             @if($isSigned)
                 <div class="max-w-4xl mx-auto mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 flex items-start gap-3 shadow-xs">
-                    <svg class="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg class="w-6 h-6 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
                     <div>
                         <span class="font-bold">{{ __('tools.edit_pdf.signed_warning_title') }}:</span>
@@ -146,13 +146,15 @@
                     direction: @js($selectedGroup['direction'] ?? null),
                     zoomScale: @js($zoomLevel / 100)
                 })"
+                @keydown.window.alt.right.prevent="$wire.nextTextItem()"
+                @keydown.window.alt.left.prevent="$wire.prevTextItem()"
                 class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
             >
                 <!-- Left Column: Document Preview & Interactive Overlays -->
                 <div class="lg:col-span-7 xl:col-span-8 flex flex-col items-center">
                     <!-- Top Control Toolbar: Navigation & Zoom -->
                     <div class="w-full mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-xs">
-                        <!-- Page Navigation -->
+                        <!-- Page Navigation & Fast Text Navigation -->
                         <div class="flex items-center gap-2">
                             <button
                                 wire:click="goToPage({{ max(1, $currentPage - 1) }})"
@@ -171,6 +173,26 @@
                             >
                                 {{ __('tools.edit_pdf.next_page') }} &rarr;
                             </button>
+
+                            <!-- Fast Text Cycling Buttons -->
+                            <div class="hidden sm:flex items-center gap-1 border-l border-slate-200 pl-2 ml-1">
+                                <button
+                                    wire:click="prevTextItem"
+                                    type="button"
+                                    class="inline-flex items-center gap-0.5 rounded-lg px-2 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition cursor-pointer"
+                                    title="{{ __('tools.edit_pdf.prev_text') }} (Alt+Left)"
+                                >
+                                    &larr; {{ __('tools.edit_pdf.prev_text') }}
+                                </button>
+                                <button
+                                    wire:click="nextTextItem"
+                                    type="button"
+                                    class="inline-flex items-center gap-0.5 rounded-lg px-2 py-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition cursor-pointer"
+                                    title="{{ __('tools.edit_pdf.next_text') }} (Alt+Right)"
+                                >
+                                    {{ __('tools.edit_pdf.next_text') }} &rarr;
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Zoom Controls -->
@@ -296,125 +318,118 @@
                                                 $mSizePx = max(5, $mEffSize * $zoomScale);
                                                 $mColor = $mItem['color'] ?? '#000000';
                                                 $mIsRtl = $this->isRtlText($mText, $mItem['direction'] ?? null);
+                                                $mFontFamily = $mIsRtl ? "'Cairo', 'Amiri', 'Arial', sans-serif" : "'Arial', 'Helvetica', sans-serif";
+                                                $mDir = $mIsRtl ? 'rtl' : 'ltr';
                                             @endphp
                                             <div
                                                 wire:key="manifest_preview_{{ $mId }}"
-                                                wire:click="{{ isset($mItem['group_id']) ? 'selectTextGroup' : 'selectTextObject' }}('{{ $mId }}')"
-                                                class="absolute z-25 bg-white border border-emerald-400 rounded-xs shadow-xs px-1 cursor-pointer flex items-center {{ $mIsRtl ? 'justify-end' : 'justify-start' }}"
-                                                style="left: {{ $mxPct }}%; top: {{ $myPct }}%; width: {{ $mwPct }}%; min-height: {{ $mhPct }}%; font-size: {{ $mSizePx }}px; line-height: 1.15; color: {{ $mColor }}; font-family: {{ $mIsRtl ? "'Cairo', 'Amiri', 'Arial', sans-serif" : "'Arial', 'Helvetica', sans-serif" }}; direction: {{ $mIsRtl ? 'rtl' : 'ltr' }}; {{ $mAutoFit ? 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' : 'overflow: visible; white-space: nowrap;' }}"
-                                                title="Queued Edit (Click to edit): {{ $mText }}"
+                                                class="absolute z-25 bg-white pointer-events-none flex items-center px-1 border border-emerald-400 rounded-xs shadow-2xs {{ $mIsRtl ? 'justify-end' : 'justify-start' }}"
+                                                style="left: {{ $mxPct }}%; top: {{ $myPct }}%; width: {{ $mwPct }}%; height: {{ $mhPct }}%;"
                                             >
-                                                <span class="inline-block select-text">{{ $mText }}</span>
-                                                <span class="absolute -top-3.5 left-0 text-[8px] font-bold bg-emerald-600 text-white px-1 py-0.5 rounded shadow-xs pointer-events-none uppercase">
-                                                    {{ __('tools.edit_pdf.edit_badge') }}
+                                                <span
+                                                    class="truncate w-full font-medium"
+                                                    style="font-size: {{ $mSizePx }}px; color: {{ $mColor }}; font-family: {{ $mFontFamily }}; direction: {{ $mDir }};"
+                                                >
+                                                    {{ $mText }}
                                                 </span>
                                             </div>
                                         @endif
                                     @endif
                                 @endforeach
 
-                                <!-- 3. Active Live Preview for Currently Selected Group/Object -->
+                                <!-- 3. Active WYSIWYG Realtime Preview -->
                                 @if($activeSelectionId && ($selectedGroup || $selectedObject))
                                     @php
-                                        $activeItem = $selectedGroup ?? $selectedObject;
-                                        $aBbox = $activeItem['bounding_box'] ?? ($activeItem['bbox'] ?? []);
-                                        $axPct = max(0, min(100, (($aBbox['left'] ?? 0) / $pWidth) * 100));
-                                        $ayPct = max(0, min(100, (($pHeight - ($aBbox['top'] ?? 0)) / $pHeight) * 100));
-                                        $awPct = max(0.5, min(100, (($aBbox['width'] ?? 20) / $pWidth) * 100));
-                                        $ahPct = max(0.5, min(100, (($aBbox['height'] ?? 10) / $pHeight) * 100));
-
-                                        $aOrigText = (string)($activeItem['text'] ?? '');
-                                        $aBaseSize = (float)($editFontSize ?? ($activeItem['font_size'] ?? 12.0));
-                                        $aEffSize = $this->computeEffectiveFontSize($aBaseSize, $aOrigText, $editText, $autoFit);
-                                        $aSizePx = max(5, $aEffSize * $zoomScale);
-                                        $aColor = $editColor ?: '#000000';
-                                        $aIsRtl = $this->isRtlText($editText, $activeItem['direction'] ?? null);
+                                        $actBbox = $selectedGroup ? ($selectedGroup['bounding_box'] ?? []) : ($selectedObject['bbox'] ?? []);
+                                        $actX = max(0, min(100, (($actBbox['left'] ?? 0) / $pWidth) * 100));
+                                        $actY = max(0, min(100, (($pHeight - ($actBbox['top'] ?? 0)) / $pHeight) * 100));
+                                        $actW = max(0.5, min(100, (($actBbox['width'] ?? 20) / $pWidth) * 100));
+                                        $actH = max(0.5, min(100, (($actBbox['height'] ?? 10) / $pHeight) * 100));
                                     @endphp
                                     <div
                                         id="active-live-preview-box"
-                                        wire:key="active_preview_{{ $activeSelectionId }}"
-                                        class="absolute z-30 bg-white ring-2 ring-indigo-600 rounded-xs shadow-md px-1 pointer-events-none flex items-center {{ $aIsRtl ? 'justify-end' : 'justify-start' }}"
-                                        style="left: {{ $axPct }}%; top: {{ $ayPct }}%; width: {{ $awPct }}%; min-height: {{ $ahPct }}%; font-size: {{ $aSizePx }}px; line-height: 1.15; color: {{ $aColor }}; font-family: {{ $aIsRtl ? "'Cairo', 'Amiri', 'Arial', sans-serif" : "'Arial', 'Helvetica', sans-serif" }}; direction: {{ $aIsRtl ? 'rtl' : 'ltr' }}; {{ $autoFit ? 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' : 'overflow: visible; white-space: nowrap;' }}"
+                                        class="absolute z-30 bg-white ring-2 ring-indigo-600 rounded-xs shadow-md flex items-center px-1 pointer-events-none"
+                                        style="left: {{ $actX }}%; top: {{ $actY }}%; width: {{ $actW }}%; height: {{ $actH }}%;"
                                     >
-                                        <span class="inline-block select-text" x-text="$wire.editText">{{ $editText }}</span>
-                                        <span class="absolute -top-3.5 left-0 text-[8px] font-bold bg-indigo-600 text-white px-1 py-0.5 rounded shadow-xs pointer-events-none uppercase tracking-wide">
-                                            {{ __('tools.edit_pdf.live_preview') }}
-                                        </span>
+                                        <span class="sr-only">{{ __('tools.edit_pdf.live_preview') }}</span>
+                                        <span
+                                            x-text="localText"
+                                            class="w-full font-medium"
+                                            :style="activePreviewStyle"
+                                        ></span>
                                     </div>
                                 @endif
                             @endif
 
-                            <!-- Additive Shapes on Current Page -->
-                            @foreach($addedShapes as $sId => $shape)
-                                @if(($shape['page'] ?? 1) === $currentPage)
+                            <!-- 4. Additive Text Overlays on Current Page -->
+                            @foreach($addedTexts as $tId => $txt)
+                                @if(((int)($txt['page'] ?? 1)) === $currentPage)
                                     @php
-                                        $sX = ($shape['x_ratio'] ?? 0.1) * 100;
-                                        $sY = ($shape['y_ratio'] ?? 0.1) * 100;
-                                        $sW = ($shape['width_ratio'] ?? 0.2) * 100;
-                                        $sH = ($shape['height_ratio'] ?? 0.05) * 100;
-                                        $sType = $shape['type'] ?? 'rect';
+                                        $tx = max(0, min(95, ($txt['x_ratio'] ?? 0.2) * 100));
+                                        $ty = max(0, min(95, ($txt['y_ratio'] ?? 0.2) * 100));
+                                        $tSize = max(6, ((float)($txt['font_size'] ?? 14)) * ($zoomLevel / 100));
+                                        $tColor = $txt['color'] ?? '#000000';
                                     @endphp
                                     <div
-                                        wire:key="shape_{{ $sId }}"
-                                        class="absolute pointer-events-none z-15"
-                                        style="left: {{ $sX }}%; top: {{ $sY }}%; width: {{ $sW }}%; height: {{ $sH }}%;"
+                                        wire:key="added_text_{{ $tId }}"
+                                        class="absolute z-35 bg-white/80 border border-dashed border-indigo-400 p-1 cursor-move"
+                                        style="left: {{ $tx }}%; top: {{ $ty }}%; font-size: {{ $tSize }}px; color: {{ $tColor }};"
                                     >
-                                        @if($sType === 'highlight')
-                                            <div class="w-full h-full bg-yellow-300/40 rounded-xs"></div>
-                                        @elseif($sType === 'line')
-                                            <div class="w-full border-b-2" style="border-color: {{ $shape['stroke_color'] ?? '#ef4444' }};"></div>
-                                        @else
-                                            <div class="w-full h-full border-2 rounded-xs" style="border-color: {{ $shape['stroke_color'] ?? '#2563eb' }}; background-color: {{ (!empty($shape['fill_color']) && $shape['fill_color'] !== 'none') ? $shape['fill_color'] : 'transparent' }};"></div>
-                                        @endif
+                                        {{ $txt['text'] }}
                                     </div>
                                 @endif
                             @endforeach
 
-                            <!-- Additive Text Items on Current Page -->
-                            @foreach($addedTexts as $tId => $txtItem)
-                                @if(($txtItem['page'] ?? 1) === $currentPage)
+                            <!-- 5. Additive Shape Overlays on Current Page -->
+                            @foreach($addedShapes as $sId => $shp)
+                                @if(((int)($shp['page'] ?? 1)) === $currentPage)
                                     @php
-                                        $tX = ($txtItem['x_ratio'] ?? 0.1) * 100;
-                                        $tY = ($txtItem['y_ratio'] ?? 0.1) * 100;
+                                        $sx = max(0, min(95, ($shp['x_ratio'] ?? 0.2) * 100));
+                                        $sy = max(0, min(95, ($shp['y_ratio'] ?? 0.2) * 100));
+                                        $sw = max(1, min(90, ($shp['width_ratio'] ?? 0.2) * 100));
+                                        $sh = max(1, min(90, ($shp['height_ratio'] ?? 0.1) * 100));
+                                        $stroke = $shp['stroke_color'] ?? '#4f46e5';
+                                        $fill = $shp['fill_color'] ?? 'transparent';
                                     @endphp
                                     <div
-                                        wire:key="add_txt_{{ $tId }}"
-                                        class="absolute pointer-events-none z-25 font-sans whitespace-nowrap"
-                                        style="left: {{ $tX }}%; top: {{ $tY }}%; font-size: {{ $txtItem['font_size'] ?? 14 }}px; color: {{ $txtItem['color'] ?? '#000000' }};"
-                                    >
-                                        {{ $txtItem['text'] }}
-                                    </div>
+                                        wire:key="added_shape_{{ $sId }}"
+                                        class="absolute z-35 pointer-events-none"
+                                        style="left: {{ $sx }}%; top: {{ $sy }}%; width: {{ $sw }}%; height: {{ $sh }}%; border: 2px solid {{ $stroke }}; background-color: {{ $fill }};"
+                                    ></div>
                                 @endif
                             @endforeach
                         </div>
                     </div>
 
-                    <!-- Page Thumbnails Strip -->
+                    <!-- Bottom Thumbnail Strip (if multi-page) -->
                     @if($pageCount > 1 && !empty($pageThumbnails))
-                        <div class="w-full mt-4 flex items-center gap-3 overflow-x-auto p-2 bg-slate-100 rounded-2xl border border-slate-200">
-                            @for($p = 1; $p <= $pageCount; $p++)
+                        <div class="w-full mt-4 p-3 bg-white rounded-2xl border border-slate-200 overflow-x-auto flex items-center gap-3 shadow-xs">
+                            @foreach(range(1, $pageCount) as $pNum)
                                 <button
-                                    wire:click="goToPage({{ $p }})"
-                                    class="shrink-0 flex flex-col items-center gap-1 p-1 rounded-xl transition cursor-pointer {{ $currentPage === $p ? 'ring-2 ring-indigo-600 bg-white shadow-xs' : 'opacity-70 hover:opacity-100' }}"
+                                    wire:click="goToPage({{ $pNum }})"
+                                    class="relative shrink-0 rounded-lg overflow-hidden border-2 transition cursor-pointer {{ $currentPage === $pNum ? 'border-indigo-600 ring-2 ring-indigo-100 shadow-xs' : 'border-slate-200 hover:border-slate-300 opacity-70 hover:opacity-100' }}"
+                                    style="width: 70px; height: 95px;"
                                 >
-                                    @if(isset($pageThumbnails[$p]))
-                                        <img src="{{ $pageThumbnails[$p] }}" alt="Thumb {{ $p }}" class="h-16 w-12 object-cover rounded border border-slate-300" />
+                                    @if(isset($pageThumbnails[$pNum]))
+                                        <img src="{{ $pageThumbnails[$pNum] }}" alt="Page {{ $pNum }}" class="w-full h-full object-contain bg-white" />
                                     @else
-                                        <div class="h-16 w-12 bg-white rounded border border-slate-300 flex items-center justify-center text-[10px] text-slate-400">
-                                            {{ $p }}
+                                        <div class="w-full h-full bg-slate-100 flex items-center justify-center text-xs text-slate-400 font-bold">
+                                            {{ $pNum }}
                                         </div>
                                     @endif
-                                    <span class="text-[10px] font-semibold text-slate-700">{{ $p }}</span>
+                                    <span class="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[9px] font-bold px-1 rounded">
+                                        {{ $pNum }}
+                                    </span>
                                 </button>
-                            @endfor
+                            @endforeach
                         </div>
                     @endif
                 </div>
 
-                <!-- Right Column: Editor Sidebar & Action Tabs -->
+                <!-- Right Column: Editing Tools Sidebar -->
                 <div class="lg:col-span-5 xl:col-span-4 flex flex-col gap-6">
-                    <!-- Tab Selector -->
-                    <div class="rounded-2xl border border-slate-200 bg-white p-1.5 flex gap-1 shadow-xs">
+                    <!-- Tab Switcher -->
+                    <div class="flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl">
                         <button
                             wire:click="setActiveTab('text')"
                             class="flex-1 py-2 text-xs font-semibold rounded-xl transition cursor-pointer {{ $activeTab === 'text' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100' }}"
@@ -453,6 +468,29 @@
                         @endphp
                         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col gap-4">
                             @if($hasSelected)
+                                <!-- Fast Text Navigation Controls inside Sidebar -->
+                                <div class="flex items-center justify-between gap-2 p-2 bg-slate-50 border border-slate-200 rounded-xl mb-1">
+                                    <button
+                                        wire:click="prevTextItem"
+                                        type="button"
+                                        class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 shadow-2xs transition cursor-pointer"
+                                        title="{{ __('tools.edit_pdf.prev_text') }} (Alt+Left)"
+                                    >
+                                        &larr; {{ __('tools.edit_pdf.prev_text') }}
+                                    </button>
+                                    <span class="text-[11px] font-semibold text-slate-600">
+                                        {{ __('tools.edit_pdf.text_navigation') }}
+                                    </span>
+                                    <button
+                                        wire:click="nextTextItem"
+                                        type="button"
+                                        class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 rounded-lg border border-slate-200 shadow-2xs transition cursor-pointer"
+                                        title="{{ __('tools.edit_pdf.next_text') }} (Alt+Right)"
+                                    >
+                                        {{ __('tools.edit_pdf.next_text') }} &rarr;
+                                    </button>
+                                </div>
+
                                 <div class="flex items-center justify-between border-b border-slate-100 pb-3">
                                     <div class="flex items-center gap-2">
                                         <h3 class="text-sm font-bold text-slate-900">
@@ -465,6 +503,10 @@
                                         @elseif($hasUnsaved)
                                             <span class="text-[10px] font-semibold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
                                                 {{ __('tools.edit_pdf.unsaved_badge') }}
+                                            </span>
+                                        @else
+                                            <span class="text-[10px] font-semibold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">
+                                                {{ __('tools.edit_pdf.live_preview') }}
                                             </span>
                                         @endif
                                     </div>
@@ -512,7 +554,7 @@
                                             max="144"
                                             step="0.5"
                                             @disabled(!$this->isCurrentPageNativeEditable())
-                                            class="w-full rounded-xl border border-slate-200 p-2 text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                                            class="w-full rounded-xl border border-slate-200 p-2 text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden {{ !$this->isCurrentPageNativeEditable() ? 'bg-slate-100 cursor-not-allowed text-slate-400' : 'bg-white' }}"
                                         />
                                     </div>
                                     <div>
@@ -662,13 +704,13 @@
                     @elseif($activeTab === 'shapes')
                         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col gap-4">
                             <div class="grid grid-cols-3 gap-2">
-                                <button wire:click="addShape('rect')" class="py-2 px-2 text-center rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition cursor-pointer">
+                                <button wire:click="addShapeItem('rect')" class="py-2 px-2 text-center rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition cursor-pointer">
                                     {{ __('tools.edit_pdf.add_rect_button') }}
                                 </button>
-                                <button wire:click="addShape('line')" class="py-2 px-2 text-center rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition cursor-pointer">
+                                <button wire:click="addShapeItem('line')" class="py-2 px-2 text-center rounded-xl border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition cursor-pointer">
                                     {{ __('tools.edit_pdf.add_line_button') }}
                                 </button>
-                                <button wire:click="addShape('highlight')" class="py-2 px-2 text-center rounded-xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-700 text-xs font-semibold transition cursor-pointer">
+                                <button wire:click="addShapeItem('highlight')" class="py-2 px-2 text-center rounded-xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-700 text-xs font-semibold transition cursor-pointer">
                                     {{ __('tools.edit_pdf.add_highlight_button') }}
                                 </button>
                             </div>
@@ -689,7 +731,7 @@
                                                 <span class="font-bold capitalize text-slate-800">{{ $shape['type'] }}</span>
                                                 <span class="text-[11px] text-slate-500">Page {{ $shape['page'] }}</span>
                                             </div>
-                                            <button wire:click="removeShape('{{ $sId }}')" class="text-rose-600 font-semibold hover:underline cursor-pointer">
+                                            <button wire:click="removeShapeItem('{{ $sId }}')" class="text-rose-600 font-semibold hover:underline cursor-pointer">
                                                 &#10005;
                                             </button>
                                         </div>
@@ -698,76 +740,72 @@
                             @endif
                         </div>
 
-                    <!-- Tab 4: Review Changes -->
+                    <!-- Tab 4: Review Changes Manifest -->
                     @elseif($activeTab === 'review')
                         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col gap-4">
-                            <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-                                <h3 class="text-sm font-bold text-slate-900">{{ __('tools.edit_pdf.edits_manifest_title') }}</h3>
-                                @if(!empty($editManifest) || !empty($addedTexts) || !empty($addedShapes))
-                                    <button wire:click="clearAllEdits" class="text-xs text-rose-600 font-semibold hover:underline cursor-pointer">
-                                        Clear All
-                                    </button>
-                                @endif
-                            </div>
+                            <h3 class="text-sm font-bold text-slate-900 border-b border-slate-100 pb-3">
+                                {{ __('tools.edit_pdf.edits_manifest_title') }}
+                            </h3>
 
-                            @if(empty($editManifest) && empty($addedTexts) && empty($addedShapes) && !$this->hasUnsavedActiveEdit())
+                            @php
+                                $totalMods = count($editManifest) + count($addedTexts) + count($addedShapes);
+                            @endphp
+
+                            @if($totalMods === 0)
                                 <div class="py-8 text-center text-xs text-slate-400">
                                     {{ __('tools.edit_pdf.no_edits_queued') }}
                                 </div>
                             @else
-                                <div class="space-y-3 max-h-80 overflow-y-auto pr-1">
-                                    @if($this->hasUnsavedActiveEdit())
-                                        @php
-                                            $activeItem = $selectedGroup ?? $selectedObject;
-                                            $activeOrig = (string)($activeItem['text'] ?? '');
-                                        @endphp
-                                        <div class="p-3 rounded-xl border border-indigo-200 bg-indigo-50/50 flex flex-col gap-1 text-xs">
-                                            <div class="flex items-center justify-between">
-                                                <span class="font-bold text-indigo-800">Page {{ $currentPage }} &bull; Current Text Edit</span>
-                                                <span class="text-[10px] font-semibold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
-                                                    {{ __('tools.edit_pdf.unsaved_badge') }}
-                                                </span>
-                                            </div>
-                                            <div class="line-through text-slate-400 text-[11px]">{{ $activeOrig }}</div>
-                                            <div class="font-semibold text-indigo-950" x-text="localText">{{ $editText }}</div>
-                                        </div>
-                                    @endif
+                                <div class="space-y-2.5 max-h-80 overflow-y-auto">
                                     <!-- In-place text replacements -->
-                                    @foreach($editManifest as $mId => $item)
-                                        <div wire:key="review_m_{{ $mId }}" class="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 flex flex-col gap-1 text-xs">
+                                    @foreach($editManifest as $mId => $mItem)
+                                        <div wire:key="rev_edit_{{ $mId }}" class="p-3 rounded-xl border border-emerald-200 bg-emerald-50/50 flex flex-col gap-1.5 text-xs">
                                             <div class="flex items-center justify-between">
-                                                <span class="font-bold text-emerald-800">Page {{ $item['page'] }} &bull; Text Edit</span>
-                                                <button wire:click="removeEdit('{{ $mId }}')" class="text-rose-600 font-bold hover:underline cursor-pointer">
-                                                    &#10005;
+                                                <div class="flex items-center gap-2">
+                                                    <span class="text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
+                                                        Page {{ $mItem['page'] ?? (($mItem['page_index'] ?? 0) + 1) }}
+                                                    </span>
+                                                    <span class="font-semibold text-slate-800">Text Replace</span>
+                                                </div>
+                                                <button wire:click="removeEdit('{{ $mId }}')" class="text-rose-600 font-semibold hover:underline cursor-pointer">
+                                                    {{ __('tools.edit_pdf.remove_edit') }}
                                                 </button>
                                             </div>
-                                            <div class="line-through text-slate-400 text-[11px]">{{ $item['target_text'] }}</div>
-                                            <div class="font-semibold text-emerald-900">{{ $item['replacement_text'] }}</div>
+                                            <div class="text-[11px] text-slate-500 line-through truncate">
+                                                {{ $mItem['target_text'] ?? '' }}
+                                            </div>
+                                            <div class="font-medium text-emerald-900 truncate">
+                                                &rarr; {{ $mItem['replacement_text'] ?? '' }}
+                                            </div>
                                         </div>
                                     @endforeach
 
                                     <!-- Added texts -->
-                                    @foreach($addedTexts as $tId => $item)
-                                        <div wire:key="review_t_{{ $tId }}" class="p-2.5 rounded-xl border border-indigo-200 bg-indigo-50/50 flex items-center justify-between text-xs">
-                                            <div>
-                                                <span class="font-bold text-indigo-800">Page {{ $item['page'] }} &bull; Added Text:</span>
-                                                <span class="text-slate-700 ml-1">&ldquo;{{ $item['text'] }}&rdquo;</span>
+                                    @foreach($addedTexts as $tId => $tItem)
+                                        <div wire:key="rev_txt_{{ $tId }}" class="p-3 rounded-xl border border-indigo-200 bg-indigo-50/50 flex items-center justify-between text-xs">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-[10px] font-bold uppercase bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">
+                                                    Page {{ $tItem['page'] ?? 1 }}
+                                                </span>
+                                                <span class="font-medium text-slate-800 truncate max-w-[150px]">+ {{ $tItem['text'] }}</span>
                                             </div>
-                                            <button wire:click="removeTextItem('{{ $tId }}')" class="text-rose-600 font-bold hover:underline cursor-pointer">
-                                                &#10005;
+                                            <button wire:click="removeTextItem('{{ $tId }}')" class="text-rose-600 font-semibold hover:underline cursor-pointer">
+                                                {{ __('tools.edit_pdf.remove_edit') }}
                                             </button>
                                         </div>
                                     @endforeach
 
                                     <!-- Added shapes -->
-                                    @foreach($addedShapes as $sId => $shape)
-                                        <div wire:key="review_s_{{ $sId }}" class="p-2.5 rounded-xl border border-amber-200 bg-amber-50/50 flex items-center justify-between text-xs">
-                                            <div>
-                                                <span class="font-bold text-amber-800">Page {{ $shape['page'] }} &bull; Shape:</span>
-                                                <span class="capitalize text-slate-700 ml-1">{{ $shape['type'] }}</span>
+                                    @foreach($addedShapes as $sId => $sItem)
+                                        <div wire:key="rev_shp_{{ $sId }}" class="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between text-xs">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-[10px] font-bold uppercase bg-slate-200 text-slate-800 px-1.5 py-0.5 rounded">
+                                                    Page {{ $sItem['page'] ?? 1 }}
+                                                </span>
+                                                <span class="font-semibold capitalize text-slate-800">+ {{ $sItem['type'] }}</span>
                                             </div>
-                                            <button wire:click="removeShape('{{ $sId }}')" class="text-rose-600 font-bold hover:underline cursor-pointer">
-                                                &#10005;
+                                            <button wire:click="removeShapeItem('{{ $sId }}')" class="text-rose-600 font-semibold hover:underline cursor-pointer">
+                                                {{ __('tools.edit_pdf.remove_edit') }}
                                             </button>
                                         </div>
                                     @endforeach
@@ -776,31 +814,14 @@
                         </div>
                     @endif
 
-                    <!-- Process & Save Card -->
+                    <!-- Global Process & Apply Edits CTA -->
                     <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs flex flex-col gap-3">
-                        <div class="flex items-center justify-between text-xs font-semibold text-slate-600">
-                            <span>Total Queued Modifications:</span>
-                            <span class="rounded-full bg-slate-100 px-2.5 py-0.5 font-mono font-bold text-slate-900">
-                                {{ $this->totalQueuedModificationsCount }}
-                            </span>
-                        </div>
-
                         <button
-                            wire:click="process"
-                            wire:loading.attr="disabled"
-                            wire:target="process"
-                            @disabled($jobStatus === 'processing' || (empty($editManifest) && empty($addedTexts) && empty($addedShapes)))
-                            class="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white shadow-md hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer flex items-center justify-center gap-2"
+                            wire:click="processEdits"
+                            @disabled($this->totalQueuedModificationsCount === 0)
+                            class="w-full rounded-2xl bg-indigo-600 py-3.5 text-sm font-bold text-white shadow-md hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
                         >
-                            <svg wire:loading.remove wire:target="process" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
-                            </svg>
-                            <svg wire:loading wire:target="process" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                            </svg>
-                            <span wire:loading.remove wire:target="process">{{ __('tools.edit_pdf.action') }}</span>
-                            <span wire:loading wire:target="process">{{ __('ui.status_processing') }}</span>
+                            {{ __('tools.edit_pdf.process_button', ['count' => $this->totalQueuedModificationsCount]) }}
                         </button>
                     </div>
                 </div>
