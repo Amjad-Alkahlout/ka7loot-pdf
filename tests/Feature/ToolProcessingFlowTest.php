@@ -6,6 +6,11 @@ use App\Enums\JobStatus;
 use App\Enums\ToolType;
 use App\Jobs\ProcessFileJob;
 use App\Livewire\Tools\CompressPdfComponent;
+use App\Livewire\Tools\EditPdfComponent;
+use App\Livewire\Tools\MergePdfComponent;
+use App\Livewire\Tools\RemoveImageBackgroundComponent;
+use App\Livewire\Tools\ResizeImageComponent;
+use App\Livewire\Tools\SplitPdfComponent;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
 use App\Services\File\FileStorageManager;
@@ -240,5 +245,98 @@ class ToolProcessingFlowTest extends TestCase
             ->assertSet('jobStatus', 'completed')
             ->assertSee('test_compressed.pdf')
             ->assertSee('-50%');
+    }
+
+    /**
+     * Test Home navigation link generation and homepage response.
+     */
+    public function test_home_navigation_link_generation_and_homepage_response(): void
+    {
+        // 1. Root relative helper generation
+        $this->assertEquals('/', route('home', [], false));
+
+        // 2. Homepage responds 200
+        $res = $this->get('/');
+        $res->assertStatus(200);
+
+        // 3. Rendered tool page has root-relative home links
+        $enPage = $this->withSession(['locale' => 'en'])->get('/merge-pdf');
+        $enPage->assertStatus(200);
+        $enPage->assertSee('href="/"', false);
+
+        $arPage = $this->withSession(['locale' => 'ar'])->get('/merge-pdf');
+        $arPage->assertStatus(200);
+        $arPage->assertSee('href="/"', false);
+        $arPage->assertSee('الرئيسية');
+    }
+
+    /**
+     * Test deleteJobFiles action on representative tool components.
+     */
+    public function test_delete_job_files_action_on_representative_tools(): void
+    {
+        $components = [
+            MergePdfComponent::class             => ToolType::MERGE_PDF,
+            CompressPdfComponent::class          => ToolType::COMPRESS_PDF,
+            SplitPdfComponent::class             => ToolType::SPLIT_PDF,
+            ResizeImageComponent::class          => ToolType::RESIZE_IMAGE,
+            RemoveImageBackgroundComponent::class => ToolType::REMOVE_BACKGROUND,
+            EditPdfComponent::class              => ToolType::EDIT_PDF,
+        ];
+
+        foreach ($components as $componentClass => $toolType) {
+            $jobId = Str::uuid()->toString();
+            $token = Str::random(48);
+            $jobDir = $this->storage->getJobDirectory($jobId);
+
+            $filePath = $jobDir . DIRECTORY_SEPARATOR . 'sample_output.dat';
+            file_put_contents($filePath, 'sample tool output');
+            $this->assertFileExists($filePath);
+
+            $job = FileJob::create([
+                'id'             => $jobId,
+                'tool_type'      => $toolType,
+                'status'         => JobStatus::COMPLETED,
+                'download_token' => $token,
+                'expires_at'     => now()->addHour(),
+            ]);
+
+            // Call deleteJobFiles without throwing MethodNotFoundException or 500
+            Livewire::test($componentClass)
+                ->set('fileJobId', $jobId)
+                ->set('jobStatus', 'completed')
+                ->call('deleteJobFiles')
+                ->assertSet('jobStatus', 'empty')
+                ->assertSet('fileJobId', null);
+
+            // Verify disk directory was deleted
+            $this->assertFileDoesNotExist($filePath);
+
+            // Verify DB status transitioned to EXPIRED
+            $job->refresh();
+            $this->assertEquals(JobStatus::EXPIRED, $job->status);
+        }
+    }
+
+    /**
+     * Test resetWorkflow action on representative tool components.
+     */
+    public function test_reset_workflow_action_on_representative_tools(): void
+    {
+        $components = [
+            MergePdfComponent::class,
+            CompressPdfComponent::class,
+            SplitPdfComponent::class,
+            ResizeImageComponent::class,
+            RemoveImageBackgroundComponent::class,
+            EditPdfComponent::class,
+        ];
+
+        foreach ($components as $componentClass) {
+            Livewire::test($componentClass)
+                ->set('jobStatus', 'completed')
+                ->call('resetWorkflow')
+                ->assertSet('jobStatus', 'empty');
+        }
     }
 }

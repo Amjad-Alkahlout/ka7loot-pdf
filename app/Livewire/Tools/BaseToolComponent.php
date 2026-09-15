@@ -150,8 +150,26 @@ abstract class BaseToolComponent extends Component
             $job->update(['status' => JobStatus::EXPIRED]);
         }
 
+        $this->resetUpload();
         $this->resetState();
         session()->flash('status', __('ui.deleted_success'));
+    }
+
+    /**
+     * Delete files immediately from server (invoked by job-result UI).
+     */
+    public function deleteJobFiles(FileStorageManager $storage): void
+    {
+        $this->deleteNow($storage);
+    }
+
+    /**
+     * Reset tool workflow to initial empty state for processing another file.
+     */
+    public function resetWorkflow(): void
+    {
+        $this->resetUpload();
+        $this->resetState();
     }
 
     /**
