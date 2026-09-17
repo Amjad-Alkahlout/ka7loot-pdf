@@ -181,6 +181,9 @@ class ChangeImageBackgroundComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.change-image-background-component')
-            ->layout('layouts.app', ['title' => __('tools.change_background.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.change_background.title'),
+                'description' => __('tools.change_background.desc'),
+            ]);
     }
 }

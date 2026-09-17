@@ -1,4 +1,4 @@
-<x-app-layout :title="__('ui.error_419_title')">
+<x-app-layout :title="__('ui.error_419_title')" :noindex="true">
     <div class="min-h-[60vh] flex items-center justify-center px-4 py-16 sm:px-6 lg:px-8">
         <div class="max-w-md w-full text-center">
             <p class="text-6xl font-extrabold text-amber-500">419</p>

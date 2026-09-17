@@ -1,29 +1,125 @@
+@php
+    $appUrl = rtrim((string) config('app.url', 'https://ka7lootpdf.me'), '/');
+    if (!str_contains($appUrl, 'ka7lootpdf.me')) {
+        $appUrl = 'https://ka7lootpdf.me';
+    } elseif (str_starts_with($appUrl, 'http://')) {
+        $appUrl = 'https://' . substr($appUrl, 7);
+    }
+    $path = request()->getPathInfo();
+    $canonicalUrl = $path === '/' ? $appUrl : $appUrl . $path;
+
+    $appName = __('ui.app_name');
+    $appTagline = __('ui.app_tagline');
+
+    $pageTitle = isset($title) && !empty($title)
+        ? (str_contains($title, $appName) ? $title : $title . ' - ' . $appName)
+        : $appName . ' - ' . $appTagline;
+
+    $pageDescription = $description ?? $metaDescription ?? $appTagline;
+    $isRtl = app()->getLocale() === 'ar';
+    $ogLocale = $isRtl ? 'ar_AR' : 'en_US';
+
+    $gaMeasurementId = config('services.google.analytics.measurement_id');
+    $adsensePublisherId = config('services.google.adsense.publisher_id');
+
+    $organizationSchema = [
+        '@context' => 'https://schema.org',
+        '@type' => 'Organization',
+        'name' => $appName,
+        'url' => 'https://ka7lootpdf.me',
+        'logo' => 'https://ka7lootpdf.me/favicon.ico',
+        'founder' => [
+            '@type' => 'Person',
+            'name' => 'Amjad Alkahloot',
+            'jobTitle' => 'Software Developer',
+        ],
+    ];
+
+    $specificSchema = null;
+    if (request()->routeIs('home')) {
+        $specificSchema = [
+            '@context' => 'https://schema.org',
+            '@type' => 'WebSite',
+            'name' => $appName,
+            'url' => 'https://ka7lootpdf.me',
+            'description' => $appTagline,
+        ];
+    } elseif (request()->routeIs('tools.*')) {
+        $specificSchema = [
+            '@context' => 'https://schema.org',
+            '@type' => 'WebApplication',
+            'name' => $title ?? $appName,
+            'url' => $canonicalUrl,
+            'description' => $pageDescription,
+            'applicationCategory' => 'BusinessApplication',
+            'operatingSystem' => 'All',
+            'browserRequirements' => 'Requires JavaScript. Requires HTML5.',
+            'offers' => [
+                '@type' => 'Offer',
+                'price' => '0',
+                'priceCurrency' => 'USD',
+            ],
+        ];
+    }
+@endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" dir="{{ app()->getLocale() === 'ar' ? 'rtl' : 'ltr' }}" class="h-full bg-slate-50 text-slate-900 antialiased">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" dir="{{ $isRtl ? 'rtl' : 'ltr' }}" class="h-full bg-slate-50 text-slate-900 antialiased">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ $title ?? __('ui.app_name') }} - {{ __('ui.app_tagline') }}</title>
-    <meta name="description" content="{{ __('ui.app_tagline') }}">
+    <title>{{ $pageTitle }}</title>
+    <meta name="description" content="{{ $pageDescription }}">
 
-    <!-- Canonical & Alternate Hreflang Tags -->
-    <link rel="canonical" href="{{ url()->current() }}">
-    <link rel="alternate" hreflang="en" href="{{ route('locale.switch', 'en') }}">
-    <link rel="alternate" hreflang="ar" href="{{ route('locale.switch', 'ar') }}">
-    <link rel="alternate" hreflang="x-default" href="{{ url('/') }}">
+    @if($noindex ?? false)
+    <meta name="robots" content="noindex, nofollow">
+    @else
+    <meta name="robots" content="index, follow">
+    @endif
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="{{ $canonicalUrl }}">
 
     <!-- Open Graph Metadata -->
-    <meta property="og:title" content="{{ $title ?? __('ui.app_name') }} - {{ __('ui.app_tagline') }}">
-    <meta property="og:description" content="{{ __('ui.app_tagline') }}">
+    <meta property="og:title" content="{{ $pageTitle }}">
+    <meta property="og:description" content="{{ $pageDescription }}">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="{{ url()->current() }}">
-    <meta property="og:site_name" content="{{ __('ui.app_name') }}">
-    <meta property="og:locale" content="{{ app()->getLocale() === 'ar' ? 'ar_AR' : 'en_US' }}">
+    <meta property="og:url" content="{{ $canonicalUrl }}">
+    <meta property="og:site_name" content="{{ $appName }}">
+    <meta property="og:locale" content="{{ $ogLocale }}">
 
     <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="{{ $title ?? __('ui.app_name') }} - {{ __('ui.app_tagline') }}">
-    <meta name="twitter:description" content="{{ __('ui.app_tagline') }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ $pageTitle }}">
+    <meta name="twitter:description" content="{{ $pageDescription }}">
+
+    <!-- JSON-LD Structured Data -->
+    <script type="application/ld+json">
+    {!! json_encode($organizationSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) !!}
+    </script>
+    @if($specificSchema)
+    <script type="application/ld+json">
+    {!! json_encode($specificSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) !!}
+    </script>
+    @endif
+
+    @if(!empty($gaMeasurementId))
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id={{ $gaMeasurementId }}"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', '{{ $gaMeasurementId }}', {
+            anonymize_ip: true,
+            send_page_view: true
+        });
+    </script>
+    @endif
+
+    @if(!empty($adsensePublisherId))
+    <!-- Google AdSense -->
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client={{ $adsensePublisherId }}" crossorigin="anonymous"></script>
+    @endif
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -41,12 +137,19 @@
             },
             locale: '{{ app()->getLocale() }}',
         };
+
+        // Production-safe anonymous event tracking helper
+        window.trackEvent = function(eventName, eventParams) {
+            if (typeof window.gtag === 'function') {
+                window.gtag('event', eventName, eventParams || {});
+            }
+        };
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
     <style>
         body {
-            font-family: {{ app()->getLocale() === 'ar' ? "'Cairo', system-ui, sans-serif" : "'Plus Jakarta Sans', system-ui, sans-serif" }};
+            font-family: {{ $isRtl ? "'Cairo', system-ui, sans-serif" : "'Plus Jakarta Sans', system-ui, sans-serif" }};
         }
     </style>
 </head>
@@ -57,7 +160,7 @@
             <div class="flex items-center gap-3">
                 <a href="{{ route('home', [], false) }}" class="flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900 transition hover:opacity-90">
                     <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-md shadow-indigo-500/20">
-                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                         </svg>
                     </span>
@@ -79,7 +182,7 @@
             <div class="flex items-center gap-3">
                 <a href="{{ route('locale.switch', app()->getLocale() === 'en' ? 'ar' : 'en') }}"
                    class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition">
-                    <svg class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
                     </svg>
                     <span>{{ __('ui.switch_language') }}</span>
@@ -107,7 +210,7 @@
                 <div class="space-y-4 sm:col-span-2 lg:col-span-5">
                     <a href="{{ route('home', [], false) }}" class="inline-flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900 transition hover:opacity-90">
                         <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-md shadow-indigo-500/20">
-                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                             </svg>
                         </span>
@@ -162,11 +265,11 @@
                         </p>
                         <div class="pt-2">
                             <a href="https://github.com/Amjad-Alkahlout" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 transition-colors">
-                                <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                                <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                                     <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
                                 </svg>
                                 <span>{{ __('ui.contact_github') }}</span>
-                                <svg class="h-3 w-3 rtl:rotate-180 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <svg class="h-3 w-3 rtl:rotate-180 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                 </svg>
                             </a>

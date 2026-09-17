@@ -100,6 +100,9 @@ class ResizeImageComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.resize-image-component')
-            ->layout('layouts.app', ['title' => __('tools.resize_image.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.resize_image.title'),
+                'description' => __('tools.resize_image.desc'),
+            ]);
     }
 }

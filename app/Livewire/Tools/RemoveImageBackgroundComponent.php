@@ -104,6 +104,9 @@ class RemoveImageBackgroundComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.remove-image-background-component')
-            ->layout('layouts.app', ['title' => __('tools.remove_background.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.remove_background.title'),
+                'description' => __('tools.remove_background.desc'),
+            ]);
     }
 }

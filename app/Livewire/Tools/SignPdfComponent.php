@@ -437,6 +437,9 @@ class SignPdfComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.sign-pdf-component')
-            ->layout('layouts.app', ['title' => __('tools.sign_pdf.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.sign_pdf.title'),
+                'description' => __('tools.sign_pdf.desc'),
+            ]);
     }
 }

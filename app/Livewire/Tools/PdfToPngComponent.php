@@ -85,6 +85,9 @@ class PdfToPngComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.pdf-to-png-component')
-            ->layout('layouts.app', ['title' => __('tools.pdf_to_png.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.pdf_to_png.title'),
+                'description' => __('tools.pdf_to_png.desc'),
+            ]);
     }
 }

@@ -327,6 +327,19 @@ class ImageBackgroundRemovalAndChangeTest extends TestCase
         $this->assertStringEndsWith('_custom_bg.png', $processedFiles[0]->original_name);
     }
 
+    public function test_change_background_rejects_image_mode_without_bg_upload(): void
+    {
+        $uploadedFile = UploadedFile::fake()->image('test_change.png', 50, 50);
+
+        Livewire::test(ChangeImageBackgroundComponent::class)
+            ->set('upload', $uploadedFile)
+            ->assertSet('jobStatus', 'uploaded')
+            ->set('backgroundType', 'image')
+            ->set('bgUpload', null)
+            ->call('process')
+            ->assertHasErrors(['bgUpload']);
+    }
+
     public function test_remove_background_rejects_oversized_file(): void
     {
         // 26 MB fake file exceeding 25 MB limit

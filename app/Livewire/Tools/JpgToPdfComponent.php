@@ -136,6 +136,9 @@ class JpgToPdfComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.jpg-to-pdf-component')
-            ->layout('layouts.app', ['title' => __('tools.jpg_to_pdf.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.jpg_to_pdf.title'),
+                'description' => __('tools.jpg_to_pdf.desc'),
+            ]);
     }
 }

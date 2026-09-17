@@ -139,6 +139,9 @@ class UnlockPdfComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.unlock-pdf-component')
-            ->layout('layouts.app', ['title' => __('tools.unlock_pdf.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.unlock_pdf.title'),
+                'description' => __('tools.unlock_pdf.desc'),
+            ]);
     }
 }

@@ -80,6 +80,9 @@ class ConvertImageComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.convert-image-component')
-            ->layout('layouts.app', ['title' => __('tools.convert_image.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.convert_image.title'),
+                'description' => __('tools.convert_image.desc'),
+            ]);
     }
 }

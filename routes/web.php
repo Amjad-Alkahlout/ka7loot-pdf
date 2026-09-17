@@ -67,39 +67,46 @@ Route::get('/contact', function () {
 
 // SEO XML Sitemap
 Route::get('/sitemap.xml', function () {
+    $baseUrl = rtrim((string) config('app.url', 'https://ka7lootpdf.me'), '/');
+    if (!str_contains($baseUrl, 'ka7lootpdf.me')) {
+        $baseUrl = 'https://ka7lootpdf.me';
+    } elseif (str_starts_with($baseUrl, 'http://')) {
+        $baseUrl = 'https://' . substr($baseUrl, 7);
+    }
+
     $routes = [
-        'home'                    => '1.0',
-        'tools.merge-pdf'         => '0.8',
-        'tools.split-pdf'         => '0.8',
-        'tools.compress-pdf'      => '0.8',
-        'tools.pdf-to-jpg'        => '0.8',
-        'tools.pdf-to-png'        => '0.8',
-        'tools.jpg-to-pdf'        => '0.8',
-        'tools.organize-pdf'      => '0.8',
-        'tools.protect-pdf'       => '0.8',
-        'tools.unlock-pdf'        => '0.8',
-        'tools.sign-pdf'          => '0.8',
-        'tools.edit-pdf'          => '0.8',
-        'tools.compress-image'    => '0.8',
-        'tools.resize-image'      => '0.8',
-        'tools.convert-image'     => '0.8',
-        'tools.remove-background' => '0.8',
-        'tools.change-background' => '0.8',
-        'privacy-policy'          => '0.4',
-        'terms-of-service'        => '0.4',
-        'security'                => '0.4',
-        'about'                   => '0.4',
-        'contact'                 => '0.4',
+        'home'                    => ['path' => '/',                   'priority' => '1.0', 'changefreq' => 'daily'],
+        'tools.merge-pdf'         => ['path' => '/merge-pdf',         'priority' => '0.9', 'changefreq' => 'weekly'],
+        'tools.split-pdf'         => ['path' => '/split-pdf',         'priority' => '0.9', 'changefreq' => 'weekly'],
+        'tools.compress-pdf'      => ['path' => '/compress-pdf',      'priority' => '0.9', 'changefreq' => 'weekly'],
+        'tools.pdf-to-jpg'        => ['path' => '/pdf-to-jpg',        'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.pdf-to-png'        => ['path' => '/pdf-to-png',        'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.jpg-to-pdf'        => ['path' => '/jpg-to-pdf',        'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.organize-pdf'      => ['path' => '/organize-pdf',      'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.protect-pdf'       => ['path' => '/protect-pdf',       'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.unlock-pdf'        => ['path' => '/unlock-pdf',        'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.sign-pdf'          => ['path' => '/sign-pdf',          'priority' => '0.9', 'changefreq' => 'weekly'],
+        'tools.edit-pdf'          => ['path' => '/edit-pdf',          'priority' => '0.9', 'changefreq' => 'weekly'],
+        'tools.compress-image'    => ['path' => '/compress-image',    'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.resize-image'      => ['path' => '/resize-image',      'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.convert-image'     => ['path' => '/convert-image',     'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.remove-background' => ['path' => '/remove-background', 'priority' => '0.9', 'changefreq' => 'weekly'],
+        'tools.change-background' => ['path' => '/change-background', 'priority' => '0.8', 'changefreq' => 'weekly'],
+        'about'                   => ['path' => '/about',             'priority' => '0.5', 'changefreq' => 'monthly'],
+        'contact'                 => ['path' => '/contact',           'priority' => '0.5', 'changefreq' => 'monthly'],
+        'privacy-policy'          => ['path' => '/privacy-policy',    'priority' => '0.5', 'changefreq' => 'monthly'],
+        'terms-of-service'        => ['path' => '/terms-of-service',  'priority' => '0.5', 'changefreq' => 'monthly'],
+        'security'                => ['path' => '/security',          'priority' => '0.5', 'changefreq' => 'monthly'],
     ];
 
     $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
     $xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
-    foreach ($routes as $routeName => $priority) {
-        $loc = route($routeName);
+    foreach ($routes as $routeInfo) {
+        $loc = $routeInfo['path'] === '/' ? $baseUrl : $baseUrl . $routeInfo['path'];
         $xml .= "  <url>\n";
         $xml .= "    <loc>{$loc}</loc>\n";
-        $xml .= "    <changefreq>weekly</changefreq>\n";
-        $xml .= "    <priority>{$priority}</priority>\n";
+        $xml .= "    <changefreq>{$routeInfo['changefreq']}</changefreq>\n";
+        $xml .= "    <priority>{$routeInfo['priority']}</priority>\n";
         $xml .= "  </url>\n";
     }
     $xml .= '</urlset>';
@@ -109,6 +116,31 @@ Route::get('/sitemap.xml', function () {
         'Cache-Control' => 'public, max-age=3600',
     ]);
 })->name('sitemap');
+
+// Robots.txt
+Route::get('/robots.txt', function () {
+    $baseUrl = rtrim((string) config('app.url', 'https://ka7lootpdf.me'), '/');
+    if (!str_contains($baseUrl, 'ka7lootpdf.me')) {
+        $baseUrl = 'https://ka7lootpdf.me';
+    } elseif (str_starts_with($baseUrl, 'http://')) {
+        $baseUrl = 'https://' . substr($baseUrl, 7);
+    }
+
+    $content = "User-agent: *\n";
+    $content .= "Disallow: /download/\n";
+    $content .= "Disallow: /s/\n";
+    $content .= "Disallow: /job/\n";
+    $content .= "Disallow: /share/\n";
+    $content .= "Disallow: /lang/\n";
+    $content .= "Disallow: /livewire/\n";
+    $content .= "Allow: /\n\n";
+    $content .= "Sitemap: {$baseUrl}/sitemap.xml\n";
+
+    return response($content, 200, [
+        'Content-Type'  => 'text/plain',
+        'Cache-Control' => 'public, max-age=86400',
+    ]);
+});
 
 // Secure File Download & Immediate Deletion
 Route::get('/download/{token}/{fileId}', [FileDownloadController::class, 'download'])

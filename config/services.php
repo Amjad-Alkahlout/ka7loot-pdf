@@ -35,4 +35,13 @@ return [
         ],
     ],
 
+    'google' => [
+        'analytics' => [
+            'measurement_id' => env('GOOGLE_ANALYTICS_MEASUREMENT_ID'),
+        ],
+        'adsense' => [
+            'publisher_id' => env('GOOGLE_ADSENSE_PUBLISHER_ID'),
+        ],
+    ],
+
 ];

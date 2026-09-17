@@ -236,6 +236,9 @@ class OrganizePdfComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.organize-pdf-component')
-            ->layout('layouts.app', ['title' => __('tools.organize_pdf.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.organize_pdf.title'),
+                'description' => __('tools.organize_pdf.desc'),
+            ]);
     }
 }

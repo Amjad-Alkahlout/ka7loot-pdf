@@ -1,4 +1,4 @@
-<x-app-layout :title="__('ui.privacy_policy')">
+<x-app-layout :title="__('ui.privacy_policy')" :description="__('ui.privacy_pledge')">
     <div class="py-12 bg-white">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="border-b border-slate-200 pb-6 mb-8">

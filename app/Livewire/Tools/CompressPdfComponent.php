@@ -153,6 +153,9 @@ class CompressPdfComponent extends BaseToolComponent
     {
         return view('livewire.tools.compress-pdf-component', [
             'hasGhostscript' => $detector->hasGhostscript(),
-        ])->layout('layouts.app', ['title' => __('tools.compress_pdf.title')]);
+        ])->layout('layouts.app', [
+            'title'       => __('tools.compress_pdf.title'),
+            'description' => __('tools.compress_pdf.desc'),
+        ]);
     }
 }

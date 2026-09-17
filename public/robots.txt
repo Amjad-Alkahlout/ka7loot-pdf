@@ -3,6 +3,8 @@ Disallow: /download/
 Disallow: /s/
 Disallow: /job/
 Disallow: /share/
+Disallow: /lang/
+Disallow: /livewire/
 Allow: /
 
-Sitemap: /sitemap.xml
+Sitemap: https://ka7lootpdf.me/sitemap.xml

@@ -142,6 +142,9 @@ class CompressImageComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.compress-image-component')
-            ->layout('layouts.app', ['title' => __('tools.compress_image.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.compress_image.title'),
+                'description' => __('tools.compress_image.desc'),
+            ]);
     }
 }

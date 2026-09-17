@@ -138,6 +138,9 @@ class ProtectPdfComponent extends BaseToolComponent
     public function render()
     {
         return view('livewire.tools.protect-pdf-component')
-            ->layout('layouts.app', ['title' => __('tools.protect_pdf.title')]);
+            ->layout('layouts.app', [
+                'title'       => __('tools.protect_pdf.title'),
+                'description' => __('tools.protect_pdf.desc'),
+            ]);
     }
 }

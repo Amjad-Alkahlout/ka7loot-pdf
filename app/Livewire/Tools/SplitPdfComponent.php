@@ -475,6 +475,9 @@ class SplitPdfComponent extends BaseToolComponent
             'splitGroups'       => $this->getSplitGroups(),
             'pageGroupMap'      => $this->getPageGroupMap(),
             'submitSummaryText' => $this->getSubmitSummaryText(),
-        ])->layout('layouts.app', ['title' => __('tools.split_pdf.title')]);
+        ])->layout('layouts.app', [
+            'title'       => __('tools.split_pdf.title'),
+            'description' => __('tools.split_pdf.desc'),
+        ]);
     }
 }
