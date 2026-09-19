@@ -159,8 +159,8 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 $fullMask = $fgMask;
             }
 
-            // 7. Render high-resolution transparent output with anti-aliased edge feathering
-            $out = $this->renderOutputWithMatting($src, $fullMask, $width, $height, $bgSamples, $tolerance, $feather);
+            // 7. Render high-resolution transparent output with anti-aliased edge feathering and decontamination
+            $out = $this->renderOutputWithMatting($src, $fullMask, $width, $height, $bgSamples, $tolerance, $feather, $scale);
 
             imagepng($out, $outputPath, 8);
 
@@ -526,17 +526,19 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                     continue;
                 }
 
-                // Guardrail 3: 2D Sobel edge energy barrier
-                if ($edgeMap[$nidx] > $edgeBarrierSensitivity) {
-                    continue;
-                }
-
                 $rgb = imagecolorat($img, $nx, $ny);
                 $r = ($rgb >> 16) & 0xFF;
                 $g = ($rgb >> 8) & 0xFF;
                 $b = $rgb & 0xFF;
 
                 $dist = $this->minSampleDistance([$r, $g, $b], $bgSamples);
+
+                // Guardrail 3: 2D Sobel edge energy barrier
+                // Prevents boundary leakage across physical subject boundaries,
+                // but does not stop on pure background pixels near sharp high-contrast edges.
+                if ($dist > ($tolerance * 0.60) && $edgeMap[$nidx] > $edgeBarrierSensitivity) {
+                    continue;
+                }
 
                 if ($dist <= $tolerance) {
                     $bgMask[$nidx] = 1;
@@ -634,7 +636,7 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
     }
 
     /**
-     * Render high-resolution transparent PNG with anti-aliased alpha boundary matting.
+     * Render high-resolution transparent PNG with anti-aliased alpha boundary matting and background color decontamination.
      */
     protected function renderOutputWithMatting(
         $src,
@@ -643,31 +645,50 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
         int $h,
         array $bgSamples,
         float $tolerance,
-        int $feather
+        int $feather,
+        float $scale = 1.0
     ) {
         $canvas = imagecreatetruecolor($w, $h);
         imagealphablending($canvas, false);
         imagesavealpha($canvas, true);
 
-        // First pass: identify boundary pixels for soft feathering
-        $isBoundary = new SplFixedArray($w * $h);
-        if ($feather > 0) {
-            for ($y = 1; $y < $h - 1; $y++) {
+        $total = $w * $h;
+        $featherRadius = max(1, min(4, $feather > 0 ? $feather : 1));
+        if ($scale < 1.0) {
+            $featherRadius = max($featherRadius, (int) min(4, ceil(1.0 / $scale)));
+        }
+
+        // Identify boundary pixels: foreground pixels located within $featherRadius of background
+        $isBoundary = new SplFixedArray($total);
+        if ($feather > 0 || $scale < 1.0) {
+            for ($y = 0; $y < $h; $y++) {
                 $yOffset = $y * $w;
-                for ($x = 1; $x < $w - 1; $x++) {
+                for ($x = 0; $x < $w; $x++) {
                     $idx = $yOffset + $x;
                     if ($fgMask[$idx] === 1) {
-                        // Check if adjacent to background
-                        if (
-                            $fgMask[$idx - 1] === 0 || $fgMask[$idx + 1] === 0 ||
-                            $fgMask[$idx - $w] === 0 || $fgMask[$idx + $w] === 0
-                        ) {
+                        $touches = false;
+                        for ($dy = -$featherRadius; $dy <= $featherRadius && !$touches; $dy++) {
+                            $ny = $y + $dy;
+                            if ($ny < 0 || $ny >= $h) continue;
+                            for ($dx = -$featherRadius; $dx <= $featherRadius && !$touches; $dx++) {
+                                $nx = $x + $dx;
+                                if ($nx < 0 || $nx >= $w) continue;
+                                if ($fgMask[$ny * $w + $nx] === 0) {
+                                    $touches = true;
+                                }
+                            }
+                        }
+                        if ($touches) {
                             $isBoundary[$idx] = 1;
                         }
                     }
                 }
             }
         }
+
+        $tLow = $tolerance * 0.50;
+        $tHigh = $tolerance * 1.50;
+        $tRange = max(1.0, $tHigh - $tLow);
 
         for ($y = 0; $y < $h; $y++) {
             $yOffset = $y * $w;
@@ -687,24 +708,77 @@ class AdvancedBackgroundRemovalEngine implements BackgroundRemovalEngineInterfac
                 $b = $rgb & 0xFF;
 
                 // Solid interior foreground pixel -> Completely opaque (0)
-                if ($feather === 0 || empty($isBoundary[$idx])) {
+                if (empty($isBoundary[$idx])) {
                     $color = imagecolorallocatealpha($canvas, $r, $g, $b, 0);
                     imagesetpixel($canvas, $x, $y, $color);
                     continue;
                 }
 
-                // Boundary pixel -> Smooth alpha matting based on distance to background
+                // Boundary pixel -> Smooth alpha matting with background color decontamination
                 $dist = $this->minSampleDistance([$r, $g, $b], $bgSamples);
-                $ratio = max(0.0, min(1.0, $dist / max(1.0, $tolerance * 1.5)));
-                // Alpha: 0 (opaque) to 127 (transparent)
-                $gdAlpha = (int) round((1.0 - $ratio) * 60.0); // subtle anti-aliasing up to ~50% transparency
 
-                $color = imagecolorallocatealpha($canvas, $r, $g, $b, max(0, min(127, $gdAlpha)));
+                // If pixel color is essentially background, remove residual edge spill
+                if ($dist <= $tLow) {
+                    $color = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
+                    imagesetpixel($canvas, $x, $y, $color);
+                    continue;
+                }
+
+                // If pixel color strongly contrasts with background, preserve full opacity
+                if ($dist >= $tHigh) {
+                    $color = imagecolorallocatealpha($canvas, $r, $g, $b, 0);
+                    imagesetpixel($canvas, $x, $y, $color);
+                    continue;
+                }
+
+                // Transition alpha [0.0 = background-like, 1.0 = foreground-like]
+                $alphaNorm = max(0.0, min(1.0, ($dist - $tLow) / $tRange));
+                if ($alphaNorm < 0.05) {
+                    $color = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
+                    imagesetpixel($canvas, $x, $y, $color);
+                    continue;
+                }
+
+                // Decontaminate background color spill from boundary pixel RGB
+                $closestBg = $this->getClosestBackgroundSample([$r, $g, $b], $bgSamples);
+                $cleanR = max(0, min(255, (int) round($closestBg[0] + ($r - $closestBg[0]) / max($alphaNorm, 0.25))));
+                $cleanG = max(0, min(255, (int) round($closestBg[1] + ($g - $closestBg[1]) / max($alphaNorm, 0.25))));
+                $cleanB = max(0, min(255, (int) round($closestBg[2] + ($b - $closestBg[2]) / max($alphaNorm, 0.25))));
+
+                $gdAlpha = (int) round((1.0 - $alphaNorm) * 127.0);
+
+                $color = imagecolorallocatealpha($canvas, $cleanR, $cleanG, $cleanB, $gdAlpha);
                 imagesetpixel($canvas, $x, $y, $color);
             }
         }
 
         return $canvas;
+    }
+
+    /**
+     * Find closest background sample for local color decontamination.
+     */
+    protected function getClosestBackgroundSample(array $rgb, array $samples): array
+    {
+        $minDist = PHP_FLOAT_MAX;
+        $closest = $samples[0] ?? [255, 255, 255];
+        $r1 = $rgb[0];
+        $g1 = $rgb[1];
+        $b1 = $rgb[2];
+
+        foreach ($samples as $s) {
+            $dr = $r1 - $s[0];
+            $dg = $g1 - $s[1];
+            $db = $b1 - $s[2];
+            $rmean = ($r1 + $s[0]) / 2.0;
+            $dist = (2 + $rmean / 256.0) * $dr * $dr + 4.0 * $dg * $dg + (2 + (255 - $rmean) / 256.0) * $db * $db;
+            if ($dist < $minDist) {
+                $minDist = $dist;
+                $closest = $s;
+            }
+        }
+
+        return $closest;
     }
 
     /**

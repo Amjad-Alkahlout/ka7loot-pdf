@@ -467,4 +467,115 @@ class AdvancedBackgroundRemovalEngineTest extends TestCase
         $this->assertEquals(0, $lensAlpha, 'Product lens core must be preserved');
         $this->assertGreaterThan(120, $bgAlpha, 'Product studio background must be removed');
     }
+
+    /**
+     * Test scanned/stamped document edge decontamination:
+     * Eliminates white/gray halo around 1px lines, signatures, and blue logos
+     * over both dark and light backgrounds without eroding thin strokes.
+     */
+    public function test_document_logo_signature_decontamination_eliminates_white_halo_on_dark_and_light_backgrounds(): void
+    {
+        $w = 400;
+        $h = 250;
+        $im = imagecreatetruecolor($w, $h);
+        $white = imagecolorallocate($im, 255, 255, 255);
+        imagefilledrectangle($im, 0, 0, $w, $h, $white);
+
+        // 1. Thin 1px black divider line
+        $black = imagecolorallocate($im, 15, 15, 15);
+        imageline($im, 40, 110, 360, 110, $black);
+
+        // 2. Blue company logo (like TRS logo) with interior white text
+        $blue = imagecolorallocate($im, 0, 85, 185);
+        imagefilledrectangle($im, 30, 30, 110, 80, $blue);
+        $logoWhite = imagecolorallocate($im, 255, 255, 255);
+        imagefilledrectangle($im, 45, 45, 95, 65, $logoWhite);
+
+        // 3. Thin handwritten signature stroke (1-2px)
+        $sigColor = imagecolorallocate($im, 20, 25, 45);
+        for ($t = 0; $t < 150; $t++) {
+            $x = 150 + $t;
+            $y = 180 + (int) (20 * sin($t / 15.0) + 10 * cos($t / 30.0));
+            imagesetpixel($im, $x, $y, $sigColor);
+            imagesetpixel($im, $x, $y + 1, $sigColor);
+        }
+
+        $inputPath = $this->tempDir . DIRECTORY_SEPARATOR . "doc_signature_logo.png";
+        imagepng($im, $inputPath);
+        imagedestroy($im);
+
+        $outputPath = $this->tempDir . DIRECTORY_SEPARATOR . "doc_signature_logo_out.png";
+        $engine = new AdvancedBackgroundRemovalEngine();
+        $engine->removeBackground($inputPath, $outputPath, ["tolerance" => 25, "feather" => 2]);
+
+        $this->assertTrue(file_exists($outputPath));
+        $res = imagecreatefrompng($outputPath);
+
+        // A. Verify transparency and core element preservation
+        $bgAlpha = (imagecolorat($res, 10, 10) >> 24) & 0x7F;
+        $lineAlpha = (imagecolorat($res, 200, 110) >> 24) & 0x7F;
+        $logoAlpha = (imagecolorat($res, 35, 35) >> 24) & 0x7F;
+        $logoWhiteAlpha = (imagecolorat($res, 60, 55) >> 24) & 0x7F;
+        $sigAlpha = (imagecolorat($res, 200, 176) >> 24) & 0x7F;
+
+        $this->assertEquals(127, $bgAlpha, "Background outside elements must be fully transparent");
+        $this->assertEquals(0, $lineAlpha, "Thin 1px line must be fully opaque and intact");
+        $this->assertEquals(0, $logoAlpha, "Blue logo core must be fully opaque and intact");
+        $this->assertEquals(0, $logoWhiteAlpha, "Interior white element inside logo must be preserved");
+        $this->assertEquals(0, $sigAlpha, "Thin signature stroke must be fully opaque and intact");
+
+        // B. Composite over solid black background to test white halo elimination
+        $blackCanvas = imagecreatetruecolor($w, $h);
+        imagefilledrectangle($blackCanvas, 0, 0, $w, $h, imagecolorallocate($blackCanvas, 0, 0, 0));
+        imagealphablending($blackCanvas, true);
+        imagecopy($blackCanvas, $res, 0, 0, 0, 0, $w, $h);
+
+        $haloNearLine = 0;
+        for ($x = 40; $x <= 360; $x++) {
+            foreach ([108, 109, 111, 112] as $y) {
+                $c = imagecolorat($blackCanvas, $x, $y);
+                $r = ($c >> 16) & 0xFF;
+                $g = ($c >> 8) & 0xFF;
+                $b = $c & 0xFF;
+                if ($r > 25 || $g > 25 || $b > 25) {
+                    $haloNearLine++;
+                }
+            }
+        }
+        $this->assertEquals(0, $haloNearLine, "Must have zero white/gray halo around thin 1px line on dark background");
+
+        $haloNearLogo = 0;
+        for ($y = 30; $y <= 80; $y++) {
+            foreach ([28, 29, 111, 112] as $x) {
+                $c = imagecolorat($blackCanvas, $x, $y);
+                $r = ($c >> 16) & 0xFF;
+                if ($r > 25) {
+                    $haloNearLogo++;
+                }
+            }
+        }
+        $this->assertEquals(0, $haloNearLogo, "Must have zero white halo around blue logo perimeter on dark background");
+
+        // C. Composite over solid white background to confirm natural edge rendering
+        $whiteCanvas = imagecreatetruecolor($w, $h);
+        imagefilledrectangle($whiteCanvas, 0, 0, $w, $h, imagecolorallocate($whiteCanvas, 255, 255, 255));
+        imagealphablending($whiteCanvas, true);
+        imagecopy($whiteCanvas, $res, 0, 0, 0, 0, $w, $h);
+
+        $lineOverWhite = imagecolorat($whiteCanvas, 200, 110);
+        $lr = ($lineOverWhite >> 16) & 0xFF;
+        $lg = ($lineOverWhite >> 8) & 0xFF;
+        $lb = $lineOverWhite & 0xFF;
+        $this->assertEquals([15, 15, 15], [$lr, $lg, $lb], "1px line core must retain exact color on white background");
+
+        $logoOverWhite = imagecolorat($whiteCanvas, 35, 35);
+        $br = ($logoOverWhite >> 16) & 0xFF;
+        $bgCol = ($logoOverWhite >> 8) & 0xFF;
+        $bb = $logoOverWhite & 0xFF;
+        $this->assertEquals([0, 85, 185], [$br, $bgCol, $bb], "Logo core must retain exact blue color on white background");
+
+        imagedestroy($blackCanvas);
+        imagedestroy($whiteCanvas);
+        imagedestroy($res);
+    }
 }

@@ -142,8 +142,24 @@ class ColorSamplingBackgroundRemovalEngine implements BackgroundRemovalEngineInt
                         $dist = $boundaryDistances[$idx];
                         $ratio = max(0.0, min(1.0, ($dist - $tLow) / $tRange));
                         // Ratio: 0 = background-like, 1 = foreground-like
+                        if ($ratio < 0.05) {
+                            $transparentColor = imagecolorallocatealpha($out, 0, 0, 0, 127);
+                            imagesetpixel($out, $x, $y, $transparentColor);
+                            continue;
+                        }
                         $featherAlpha = (int) round((1.0 - $ratio) * 127);
                         $finalAlpha = max($origAlpha, $featherAlpha);
+
+                        // Decontaminate background color spill from boundary pixel RGB
+                        $closestBg = $this->getClosestBackgroundSample([$r, $g, $b], $bgSamples);
+                        $alphaNorm = 1.0 - ($finalAlpha / 127.0);
+                        $cleanR = max(0, min(255, (int) round($closestBg[0] + ($r - $closestBg[0]) / max($alphaNorm, 0.25))));
+                        $cleanG = max(0, min(255, (int) round($closestBg[1] + ($g - $closestBg[1]) / max($alphaNorm, 0.25))));
+                        $cleanB = max(0, min(255, (int) round($closestBg[2] + ($b - $closestBg[2]) / max($alphaNorm, 0.25))));
+
+                        $pixelColor = imagecolorallocatealpha($out, $cleanR, $cleanG, $cleanB, $finalAlpha);
+                        imagesetpixel($out, $x, $y, $pixelColor);
+                        continue;
                     }
 
                     $pixelColor = imagecolorallocatealpha($out, $r, $g, $b, $finalAlpha);
@@ -274,6 +290,25 @@ class ColorSamplingBackgroundRemovalEngine implements BackgroundRemovalEngineInt
         }
 
         return !empty($filtered) ? $filtered : [$medoid];
+    }
+
+    /**
+     * Find closest background sample for local color decontamination.
+     */
+    protected function getClosestBackgroundSample(array $rgb, array $samples): array
+    {
+        $minDist = PHP_FLOAT_MAX;
+        $closest = $samples[0] ?? [255, 255, 255];
+
+        foreach ($samples as $s) {
+            $dist = $this->colorDistance($rgb, $s);
+            if ($dist < $minDist) {
+                $minDist = $dist;
+                $closest = $s;
+            }
+        }
+
+        return $closest;
     }
 
     /**
