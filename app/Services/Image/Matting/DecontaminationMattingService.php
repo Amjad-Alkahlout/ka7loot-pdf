@@ -442,6 +442,79 @@ class DecontaminationMattingService
             }
         }
 
+        // Island Removal Block (Appended without disrupting original stroke recovery)
+        if ($hasEdgeRecovery) {
+            $targetDist = $tolerance * 6.0;
+            $colorBg = new \SplFixedArray($total);
+
+            for ($i = 0; $i < $total; $i++) {
+                if ($fgMask[$i] === 1) {
+                    $cx = $i % $w; $cy = intdiv($i, $w);
+                    $rgb = imagecolorat($src, $cx, $cy);
+                    $r = ($rgb >> 16) & 0xFF; $g = ($rgb >> 8) & 0xFF; $b = $rgb & 0xFF;
+                    if ($this->minSampleDistance([$r, $g, $b], $bgSamples) <= $targetDist) {
+                        $colorBg[$i] = 1;
+                    }
+                }
+            }
+
+            $visited = new \SplFixedArray($total);
+            $queue = new \SplQueue();
+
+            for ($i = 0; $i < $total; $i++) {
+                if ($colorBg[$i] === 1 && empty($visited[$i])) {
+                    $queue->enqueue($i);
+                    $visited[$i] = 1;
+                    $pixels = [];
+
+                    while (!$queue->isEmpty()) {
+                        $curr = $queue->dequeue();
+                        $pixels[] = $curr;
+                        $cx = $curr % $w; $cy = intdiv($curr, $w);
+                        foreach ([[-1, 0], [1, 0], [0, -1], [0, 1]] as [$dx, $dy]) {
+                            $nx = $cx + $dx; $ny = $cy + $dy;
+                            if ($nx >= 0 && $nx < $w && $ny >= 0 && $ny < $h) {
+                                $nidx = $ny * $w + $nx;
+                                if ($colorBg[$nidx] === 1 && empty($visited[$nidx])) {
+                                    $visited[$nidx] = 1;
+                                    $queue->enqueue($nidx);
+                                }
+                            }
+                        }
+                    }
+
+                    $internalEdges = [];
+                    foreach ($pixels as $p) {
+                        $isInternal = true;
+                        $px = $p % $w; $py = intdiv($p, $w);
+                        foreach ([[-1, 0], [1, 0], [0, -1], [0, 1]] as [$dx, $dy]) {
+                            $nx = $px + $dx; $ny = $py + $dy;
+                            if ($nx >= 0 && $nx < $w && $ny >= 0 && $ny < $h) {
+                                $pnidx = $ny * $w + $nx;
+                                if (empty($colorBg[$pnidx])) {
+                                    $isInternal = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if ($isInternal) {
+                            $internalEdges[] = $edgeMap[$p];
+                        }
+                    }
+
+                    $intCount = count($internalEdges);
+                    $intMeanEdge = $intCount > 0 ? array_sum($internalEdges) / $intCount : 0.0;
+                    $intMaxEdge = $intCount > 0 ? max($internalEdges) : 0.0;
+                    
+                    if ($intMaxEdge > 0.001 && $intMeanEdge < 22.0 && $intMaxEdge < 86.0) {
+                        foreach ($pixels as $p) {
+                            $fgMask[$p] = 0;
+                        }
+                    }
+                }
+            }
+        }
+
         return $fgMask;
     }
 
