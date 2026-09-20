@@ -11,12 +11,17 @@ mkdir -p /var/www/html/storage/logs
 mkdir -p /var/www/html/bootstrap/cache
 
 # Fix ownership and permissions for runtime user
-chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
-chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
+# Prune the models directory from recursive chown/chmod to avoid EROFS crashes on read-only mount points
+find /var/www/html/storage -path /var/www/html/storage/app/models -prune -o -exec chown www-data:www-data {} +
+find /var/www/html/storage -path /var/www/html/storage/app/models -prune -o -exec chmod 775 {} +
+
+chown -R www-data:www-data /var/www/html/bootstrap/cache
+chmod -R 775 /var/www/html/bootstrap/cache
 
 # Enforce strict read-only immutability for MODNet neural model directory
 if [ -d "/var/www/html/storage/app/models" ]; then
-    chmod -R 555 /var/www/html/storage/app/models
+    # Errors are suppressed here to gracefully handle natively read-only bind mounts like U-2-Net
+    chmod -R 555 /var/www/html/storage/app/models 2>/dev/null || true
 fi
 
 # Optimization warming in production (skip if database or key not yet provisioned)
