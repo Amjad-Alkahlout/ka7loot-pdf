@@ -3,5 +3,5 @@
 !public/
 !models/
 !models/**
+*.onnx
 !.gitignore
-

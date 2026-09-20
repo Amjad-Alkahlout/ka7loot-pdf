@@ -36,6 +36,7 @@ services:
       TRUSTED_PROXIES: "127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
     volumes:
       - documorph_storage:/var/www/html/storage
+      - /opt/ka7loot-pdf/models/u2net:/var/www/html/storage/app/models/u2net:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -63,6 +64,7 @@ services:
       QUEUE_CONNECTION: database
     volumes:
       - documorph_storage:/var/www/html/storage
+      - /opt/ka7loot-pdf/models/u2net:/var/www/html/storage/app/models/u2net:ro
     depends_on:
       app:
         condition: service_healthy

@@ -23,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(BackgroundRemovalEngineInterface::class, function ($app) {
             $engineKey = config('fileprocessor.background_removal.engine', 'hybrid');
             $engineMap = config('fileprocessor.background_removal.engines', [\App\Services\Image\HybridBackgroundRemovalEngine::class,
+                'ml_u2net'       => \App\Services\Image\U2NetBackgroundRemovalEngine::class,
                 'ml_modnet'      => ModnetBackgroundRemovalEngine::class,
                 'advanced'       => AdvancedBackgroundRemovalEngine::class,
                 'color_sampling' => ColorSamplingBackgroundRemovalEngine::class,

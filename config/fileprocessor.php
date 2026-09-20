@@ -107,6 +107,7 @@ return [
         'engines' => [
             'hybrid'         => \App\Services\Image\HybridBackgroundRemovalEngine::class,
             'ml_modnet'      => \App\Services\Image\ModnetBackgroundRemovalEngine::class,
+            'ml_u2net'       => \App\Services\Image\U2NetBackgroundRemovalEngine::class,
             'advanced'       => \App\Services\Image\AdvancedBackgroundRemovalEngine::class,
             'color_sampling' => \App\Services\Image\ColorSamplingBackgroundRemovalEngine::class,
         ],

@@ -13,6 +13,8 @@ use App\Services\Image\ColorSamplingBackgroundRemovalEngine;
 use App\Services\Image\HybridBackgroundRemovalEngine;
 use App\Services\Image\ImageBackgroundService;
 use App\Services\Image\ModnetBackgroundRemovalEngine;
+use App\Services\Image\U2NetBackgroundRemovalEngine;
+use App\Services\System\SystemBinaryDetector;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Livewire\Livewire;
@@ -94,7 +96,7 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
         imagedestroy($im);
     }
 
-    public function test_hybrid_engine_routes_non_human_object_to_advanced(): void
+    public function test_hybrid_engine_routes_non_human_object_to_u2net(): void
     {
         if (!file_exists($this->productPath)) {
             $this->markTestSkipped('Product fixture not found.');
@@ -107,9 +109,9 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
         $meta = $engine->removeBackground($this->productPath, $outputPath);
 
         $this->assertFileExists($outputPath);
-        $this->assertEquals('advanced_matting', $meta['engine']);
-        $this->assertFalse($meta['is_ai']);
-        $this->assertEquals('general_object', $meta['detection']);
+        $this->assertEquals('ml_u2net', $meta['engine']);
+        $this->assertTrue($meta['is_ai']);
+        $this->assertEquals('general_graphic', $meta['detection']);
 
         // Product center must be preserved
         $im = imagecreatefrompng($outputPath);
@@ -117,6 +119,33 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
         $centerAlpha = ($centerRgba >> 24) & 0x7F;
         $this->assertLessThan(20, $centerAlpha, 'Product body must not be erased');
         imagedestroy($im);
+    }
+
+    public function test_hybrid_engine_falls_back_to_advanced_when_u2net_fails_on_non_human_object(): void
+    {
+        if (!file_exists($this->productPath)) {
+            $this->markTestSkipped('Product fixture not found.');
+        }
+
+        $mockU2Net = $this->createMock(U2NetBackgroundRemovalEngine::class);
+        $mockU2Net->method('isAvailable')->willReturn(true);
+        $mockU2Net->method('removeBackground')->willThrowException(new \RuntimeException('U2Net crash'));
+
+        $hybrid = new HybridBackgroundRemovalEngine(
+            app(ModnetBackgroundRemovalEngine::class),
+            $mockU2Net,
+            app(AdvancedBackgroundRemovalEngine::class),
+            app(ColorSamplingBackgroundRemovalEngine::class),
+            app(SystemBinaryDetector::class)
+        );
+
+        $outputPath = $this->tempDir . DIRECTORY_SEPARATOR . 'product_adv_fallback.png';
+        $meta = $hybrid->removeBackground($this->productPath, $outputPath);
+
+        $this->assertFileExists($outputPath);
+        $this->assertEquals('advanced_matting', $meta['engine']);
+        $this->assertFalse($meta['is_ai']);
+        $this->assertEquals('general_object', $meta['detection']);
     }
 
     public function test_hybrid_engine_falls_back_to_advanced_when_modnet_fails(): void
@@ -132,9 +161,10 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
 
         $hybrid = new HybridBackgroundRemovalEngine(
             $mockModnet,
+            app(U2NetBackgroundRemovalEngine::class),
             app(AdvancedBackgroundRemovalEngine::class),
             app(ColorSamplingBackgroundRemovalEngine::class),
-            app(\App\Services\System\SystemBinaryDetector::class)
+            app(SystemBinaryDetector::class)
         );
 
         $outputPath = $this->tempDir . DIRECTORY_SEPARATOR . 'fallback_out.png';
@@ -161,9 +191,10 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
 
         $hybrid = new HybridBackgroundRemovalEngine(
             $mockModnet,
+            app(U2NetBackgroundRemovalEngine::class),
             $mockAdv,
             app(ColorSamplingBackgroundRemovalEngine::class),
-            app(\App\Services\System\SystemBinaryDetector::class)
+            app(SystemBinaryDetector::class)
         );
 
         $outputPath = $this->tempDir . DIRECTORY_SEPARATOR . 'fallback_color_out.png';

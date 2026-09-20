@@ -21,7 +21,10 @@
 /storage/ml_prototype
 /storage/pdfium_prototype
 /storage/*.pdf
+/storage/app/models/
+*.onnx
 /vendor
 Homestead.json
 Homestead.yaml
 Thumbs.db
+/tests/Fixtures/background-removal/real-trs-signature.png
