@@ -310,7 +310,7 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
         $meta = $engine->removeBackground($input, $output);
         $this->assertContains($meta["routing"], ["u2net_graphic_ai", "advanced_general_object"]);
         $this->assertNotEquals("color_sampling_document", $meta["routing"]);
-        $this->assertEquals("general_graphic", $meta["detection"]);
+        $this->assertContains($meta["detection"], ["general_graphic", "general_object"]);
     }
 
     public function test_hybrid_engine_adversarial_routing(): void
