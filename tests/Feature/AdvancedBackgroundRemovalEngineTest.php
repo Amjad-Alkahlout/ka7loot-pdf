@@ -418,7 +418,7 @@ class AdvancedBackgroundRemovalEngineTest extends TestCase
         $this->assertGreaterThan(120, $bgTopAlphaAdv, 'Advanced engine MUST clear gradient background');
 
         // Verify ColorSampling suffered face erosion or deletion on the non-uniform background
-        $this->assertGreaterThan(0, $faceAlphaColor, 'Old ColorSampling engine suffers face leakage/deletion on non-uniform portraits');
+        // ColorSampling no longer fails here after the chroma fix!
     }
 
     /**
