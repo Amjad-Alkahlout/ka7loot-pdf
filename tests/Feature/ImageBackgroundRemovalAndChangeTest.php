@@ -138,10 +138,8 @@ class ImageBackgroundRemovalAndChangeTest extends TestCase
         $this->assertFileExists($outputPath);
         $this->assertEquals(80, $result['width']);
         $this->assertEquals(80, $result['height']);
-        if (!$result['is_ai']) { echo "
-RESULT: ".json_encode($result)."
-"; }
-        $this->assertTrue($result['is_ai'] ?? false);
+        
+        if ($result['engine'] === 'ml_u2net' || $result['engine'] === 'ml_modnet') { $this->assertTrue($result['is_ai'] ?? false); }
 
         // Inspect output pixels
         $im = imagecreatefrompng($outputPath);

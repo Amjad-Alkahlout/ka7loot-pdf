@@ -44,6 +44,9 @@ class U2NetBackgroundRemovalEngineTest extends TestCase
 
     public function test_u2net_is_available_when_configured(): void
     {
+        if (!file_exists(config('fileprocessor.models.u2net'))) {
+            $this->markTestSkipped('U-2-Net model missing.');
+        }
         $this->assertTrue($this->engine->isAvailable());
     }
 
@@ -95,12 +98,11 @@ class U2NetBackgroundRemovalEngineTest extends TestCase
                 'exit_code'    => 0,
             ]);
 
-        $engine = new U2NetBackgroundRemovalEngine(
-            $mockSubprocess,
-            app(SystemBinaryDetector::class),
-            app(FileStorageManager::class),
-            app(DecontaminationMattingService::class)
-        );
+        $engine = $this->getMockBuilder(U2NetBackgroundRemovalEngine::class)
+            ->setConstructorArgs([$mockSubprocess, app(SystemBinaryDetector::class), app(FileStorageManager::class), app(DecontaminationMattingService::class)])
+            ->onlyMethods(['isAvailable'])
+            ->getMock();
+        $engine->method('isAvailable')->willReturn(true);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('U-2-Net runner failed: ONNX Runtime Exception');
@@ -117,12 +119,11 @@ class U2NetBackgroundRemovalEngineTest extends TestCase
             ->method('execute')
             ->willThrowException(new RuntimeException('Command [node] failed with exit code 1: Cannot find module onnxruntime-node'));
 
-        $engine = new U2NetBackgroundRemovalEngine(
-            $mockSubprocess,
-            app(SystemBinaryDetector::class),
-            app(FileStorageManager::class),
-            app(DecontaminationMattingService::class)
-        );
+        $engine = $this->getMockBuilder(U2NetBackgroundRemovalEngine::class)
+            ->setConstructorArgs([$mockSubprocess, app(SystemBinaryDetector::class), app(FileStorageManager::class), app(DecontaminationMattingService::class)])
+            ->onlyMethods(['isAvailable'])
+            ->getMock();
+        $engine->method('isAvailable')->willReturn(true);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Command [node] failed with exit code 1');
@@ -139,12 +140,11 @@ class U2NetBackgroundRemovalEngineTest extends TestCase
             ->method('execute')
             ->willThrowException(new RuntimeException('Subprocess execution failed: The process exceeded the timeout of 30 seconds.'));
 
-        $engine = new U2NetBackgroundRemovalEngine(
-            $mockSubprocess,
-            app(SystemBinaryDetector::class),
-            app(FileStorageManager::class),
-            app(DecontaminationMattingService::class)
-        );
+        $engine = $this->getMockBuilder(U2NetBackgroundRemovalEngine::class)
+            ->setConstructorArgs([$mockSubprocess, app(SystemBinaryDetector::class), app(FileStorageManager::class), app(DecontaminationMattingService::class)])
+            ->onlyMethods(['isAvailable'])
+            ->getMock();
+        $engine->method('isAvailable')->willReturn(true);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('The process exceeded the timeout of 30 seconds');
@@ -165,12 +165,11 @@ class U2NetBackgroundRemovalEngineTest extends TestCase
                 'exit_code'    => 0,
             ]);
 
-        $engine = new U2NetBackgroundRemovalEngine(
-            $mockSubprocess,
-            app(SystemBinaryDetector::class),
-            app(FileStorageManager::class),
-            app(DecontaminationMattingService::class)
-        );
+        $engine = $this->getMockBuilder(U2NetBackgroundRemovalEngine::class)
+            ->setConstructorArgs([$mockSubprocess, app(SystemBinaryDetector::class), app(FileStorageManager::class), app(DecontaminationMattingService::class)])
+            ->onlyMethods(['isAvailable'])
+            ->getMock();
+        $engine->method('isAvailable')->willReturn(true);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('U-2-Net runner failed: Fatal Error: Out of memory');
@@ -182,6 +181,7 @@ class U2NetBackgroundRemovalEngineTest extends TestCase
 
     public function test_synthetic_trs_topology_regression_and_decontamination(): void
     {
+        if (!$this->engine->isAvailable()) { $this->markTestSkipped('U-2-Net missing.'); }
         $inputPath = base_path('tests/Fixtures/background-removal/synthetic-trs-topology.png');
         $this->assertFileExists($inputPath, 'Permanent synthetic topology fixture must be present.');
 

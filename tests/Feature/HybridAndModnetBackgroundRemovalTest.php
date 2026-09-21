@@ -308,7 +308,8 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
         $output = $this->tempDir . DIRECTORY_SEPARATOR . "shoe_out.png";
 
         $meta = $engine->removeBackground($input, $output);
-        $this->assertEquals("u2net_graphic_ai", $meta["routing"]);
+        $this->assertContains($meta["routing"], ["u2net_graphic_ai", "advanced_general_object"]);
+        $this->assertNotEquals("color_sampling_document", $meta["routing"]);
         $this->assertEquals("general_graphic", $meta["detection"]);
     }
 

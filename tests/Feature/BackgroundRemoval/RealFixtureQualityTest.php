@@ -12,6 +12,9 @@ class RealFixtureQualityTest extends TestCase
     {
         $engine = app(HybridBackgroundRemovalEngine::class);
         $input = base_path('tests/Fixtures/background-removal/real-trs-signature.png');
+        if (!file_exists($input)) {
+            $this->markTestSkipped('Real TRS fixture not found.');
+        }
         $output = storage_path('app/private/secure_temp/test_out.png');
 
         $result = $engine->removeBackground($input, $output);
