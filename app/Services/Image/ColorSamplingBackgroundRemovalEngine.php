@@ -320,15 +320,23 @@ class ColorSamplingBackgroundRemovalEngine implements BackgroundRemovalEngineInt
         $dg = $c1[1] - $c2[1];
         $db = $c1[2] - $c2[2];
 
-        // Red-mean perceptual formula
+        // Red-mean perceptual formula with boosted blue sensitivity for ink preservation
         $rMean = ($c1[0] + $c2[0]) / 2.0;
         $weightR = 2.0 + ($rMean / 256.0);
         $weightG = 4.0;
-        $weightB = 2.0 + ((255.0 - $rMean) / 256.0);
+        $weightB = 3.0 + ((255.0 - $rMean) / 256.0);
 
         $dist = sqrt($weightR * $dr * $dr + $weightG * $dg * $dg + $weightB * $db * $db);
 
-        // Normalize by max theoretical distance (~765) to 0..100 scale
+        // Apply chroma penalty: protect saturated foreground colors (like logos/ink) from neutral backgrounds
+        $chroma1 = max($c1) - min($c1);
+        $chroma2 = max($c2) - min($c2);
+        
+        if ($chroma1 > $chroma2) {
+            $dist += ($chroma1 - $chroma2) * 2.0;
+        }
+
+        // Normalize by max theoretical distance to 0..100 scale
         return ($dist / 7.65);
     }
 
@@ -396,7 +404,7 @@ class ColorSamplingBackgroundRemovalEngine implements BackgroundRemovalEngineInt
         }
 
         // BFS propagation
-        $localTolerance = $tolerance * 0.60;
+        $localTolerance = $tolerance * 0.50;
 
         while (!$queue->isEmpty()) {
             $idx = $queue->dequeue();
@@ -428,7 +436,7 @@ class ColorSamplingBackgroundRemovalEngine implements BackgroundRemovalEngineInt
                     $globalDist = $this->minBackgroundDistance($nC, $bgSamples);
 
                     // Match if within global sample tolerance OR within local propagation tolerance
-                    if ($globalDist <= $tolerance || ($this->colorDistance($nC, $currentC) <= $localTolerance && $globalDist <= $tolerance * 1.35)) {
+                    if ($globalDist <= $tolerance || ($this->colorDistance($nC, $currentC) <= $localTolerance && $globalDist <= $tolerance * 1.15)) {
                         $mask[$nidx] = 1;
                         $queue->enqueue($nidx);
                     }

@@ -27,6 +27,7 @@ class RealFixtureQualityTest extends TestCase
         $whiteOpaque = 0;
         $blackOpaque = 0;
         $blueOpaque = 0;
+        $blueEdgeOpaque = 0;
 
         for ($y = 0; $y < $h; $y++) {
             for ($x = 0; $x < $w; $x++) {
@@ -47,12 +48,16 @@ class RealFixtureQualityTest extends TestCase
                     if ($r < 100 && $b > 120 && $b > $g) {
                         $blueOpaque++;
                     }
+                    if ($r < 220 && $b > $r + 10 && $b > $g + 10) {
+                        $blueEdgeOpaque++;
+                    }
                 }
             }
         }
 
         $this->assertGreaterThan(1000, $blackOpaque, 'Black signature strokes must be preserved.');
         $this->assertGreaterThan(1000, $blueOpaque, 'Blue FIS logo must be preserved.');
+        $this->assertGreaterThan(7000, $blueEdgeOpaque, 'Blue FIS logo anti-aliased foreground edges must not be aggressively eroded.');
         $this->assertLessThan(150, $whiteOpaque, 'Large white background regions must be removed.');
 
         @unlink($output);
