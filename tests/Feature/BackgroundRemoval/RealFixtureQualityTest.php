@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\BackgroundRemoval;
 
+use App\Services\Image\HybridBackgroundRemovalEngine;
 use App\Services\Image\U2NetBackgroundRemovalEngine;
 use Tests\TestCase;
 
@@ -9,7 +10,7 @@ class RealFixtureQualityTest extends TestCase
 {
     public function test_u2net_perfectly_removes_white_islands_but_preserves_signature()
     {
-        $engine = app(U2NetBackgroundRemovalEngine::class);
+        $engine = app(HybridBackgroundRemovalEngine::class);
         $input = base_path('tests/Fixtures/background-removal/real-trs-signature.png');
         $output = storage_path('app/private/secure_temp/test_out.png');
 
@@ -49,7 +50,7 @@ class RealFixtureQualityTest extends TestCase
 
         $this->assertGreaterThan(1000, $blackOpaque, 'Black signature strokes must be preserved.');
         $this->assertGreaterThan(1000, $blueOpaque, 'Blue FIS logo must be preserved.');
-        $this->assertLessThan(2000, $whiteOpaque, 'Large white background regions must be removed.');
+        $this->assertLessThan(150, $whiteOpaque, 'Large white background regions must be removed.');
 
         @unlink($output);
     }

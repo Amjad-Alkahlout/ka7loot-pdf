@@ -267,4 +267,82 @@ class HybridAndModnetBackgroundRemovalTest extends TestCase
         $this->assertStringContainsString('AI Portrait Matting', $renderedHtml);
         $this->assertStringContainsString('MODNet', $renderedHtml);
     }
+
+    public function test_hybrid_engine_routes_document_signature_to_colorsampling(): void
+    {
+        $input = base_path("tests/Fixtures/background-removal/real-trs-signature.png");
+        if (!file_exists($input)) {
+            $this->markTestSkipped("Real TRS fixture not found.");
+        }
+        $engine = app(HybridBackgroundRemovalEngine::class);
+        $output = $this->tempDir . DIRECTORY_SEPARATOR . "doc_out.png";
+
+        $meta = $engine->removeBackground($input, $output);
+        
+        $this->assertEquals("color_sampling_document", $meta["routing"]);
+        $this->assertEquals("document_signature", $meta["detection"]);
+    }
+
+    public function test_hybrid_engine_routes_synthetic_graphic_to_colorsampling(): void
+    {
+        $engine = app(HybridBackgroundRemovalEngine::class);
+        $input = base_path("tests/Fixtures/background-removal/synthetic-trs-topology.png");
+        $output = $this->tempDir . DIRECTORY_SEPARATOR . "syn_out.png";
+
+        $meta = $engine->removeBackground($input, $output);
+        $this->assertEquals("color_sampling_document", $meta["routing"]);
+        $this->assertEquals("document_signature", $meta["detection"]);
+    }
+
+    public function test_hybrid_engine_does_not_misroute_white_background_object_to_colorsampling(): void
+    {
+        $engine = app(HybridBackgroundRemovalEngine::class);
+        $img = imagecreatetruecolor(400, 300);
+        $white = imagecolorallocate($img, 255, 255, 255);
+        $shoeColor = imagecolorallocate($img, 240, 240, 240); // very light gray
+        imagefilledrectangle($img, 0, 0, 400, 300, $white);
+        imagefilledellipse($img, 200, 150, 250, 250, $shoeColor);
+        $input = $this->tempDir . "/mock-shoe.png";
+        imagepng($img, $input);
+        imagedestroy($img);
+        $output = $this->tempDir . DIRECTORY_SEPARATOR . "shoe_out.png";
+
+        $meta = $engine->removeBackground($input, $output);
+        $this->assertEquals("u2net_graphic_ai", $meta["routing"]);
+        $this->assertEquals("general_graphic", $meta["detection"]);
+    }
+
+    public function test_hybrid_engine_adversarial_routing(): void
+    {
+        $engine = app(HybridBackgroundRemovalEngine::class);
+
+        // F. Empty white image -> should NOT be document
+        $img = imagecreatetruecolor(400, 300);
+        imagefilledrectangle($img, 0, 0, 400, 300, imagecolorallocate($img, 255, 255, 255));
+        $emptyPath = $this->tempDir . "/empty.png";
+        imagepng($img, $emptyPath);
+        imagedestroy($img);
+        $meta = $engine->removeBackground($emptyPath, $this->tempDir . "/out.png");
+        $this->assertNotEquals("color_sampling_document", $meta["routing"]);
+
+        // G. Dark background graphic -> should NOT be document
+        $img = imagecreatetruecolor(400, 300);
+        imagefilledrectangle($img, 0, 0, 400, 300, imagecolorallocate($img, 50, 50, 50));
+        imagefilledellipse($img, 200, 150, 100, 100, imagecolorallocate($img, 255, 0, 0));
+        $darkPath = $this->tempDir . "/dark.png";
+        imagepng($img, $darkPath);
+        imagedestroy($img);
+        $meta = $engine->removeBackground($darkPath, $this->tempDir . "/out.png");
+        $this->assertNotEquals("color_sampling_document", $meta["routing"]);
+        
+        // E. Sparse logo -> low transition count/ink ratio -> general graphic
+        $img = imagecreatetruecolor(400, 300);
+        imagefilledrectangle($img, 0, 0, 400, 300, imagecolorallocate($img, 255, 255, 255));
+        for($x = 100; $x < 300; $x += 10) { imageline($img, $x, 140, $x, 160, imagecolorallocate($img, 0, 0, 0)); }
+        $logoPath = $this->tempDir . "/logo.png";
+        imagepng($img, $logoPath);
+        imagedestroy($img);
+        $meta = $engine->removeBackground($logoPath, $this->tempDir . "/out.png");
+        $this->assertNotEquals("color_sampling_document", $meta["routing"]);
+    }
 }
