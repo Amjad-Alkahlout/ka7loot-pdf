@@ -390,7 +390,7 @@ class SplitPdfComponent extends BaseToolComponent
             $storage->getJobDirectory($jobId);
 
             $sanitized = $sanitizer->execute($this->upload, ['application/pdf']);
-            $this->upload->storeAs("secure_temp/{$jobId}", $sanitized['safe_filename'], 'local');
+            $this->upload->storeAs(config('fileprocessor.storage.temp_path', 'secure_temp') . "/{$jobId}", $sanitized['safe_filename'], config('fileprocessor.storage.disk', 'local'));
 
             $job = FileJob::create([
                 'id'             => $jobId,

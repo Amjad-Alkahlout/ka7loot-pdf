@@ -136,6 +136,18 @@
                     </div>
                 </a>
 
+                <!-- HEIC to PDF -->
+                <a href="{{ route('tools.heic-to-pdf') }}" class="group relative flex h-full flex-col justify-between rounded-2xl border border-slate-200/90 bg-white p-6 shadow-xs transition duration-200 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-md hover:shadow-indigo-500/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 col-span-1 sm:col-span-1 lg:col-span-3">
+                    <div class="flex flex-1 flex-col">
+                        <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 group-hover:scale-105 transition-transform duration-200">
+                            <span class="text-xs font-extrabold">HEIC</span>
+                        </div>
+                        <h3 class="text-base sm:text-lg font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">{{ __('tools.heic_to_pdf.title') }}</h3>
+                        <p class="mt-2 text-sm text-slate-500 leading-relaxed min-h-[44px] sm:min-h-[48px] flex-1">{{ __('tools.heic_to_pdf.desc') }}</p>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-slate-100 flex items-center"><span class="text-xs font-semibold text-indigo-600">{{ __('ui.get_started') }} <span aria-hidden="true">&rarr;</span></span></div>
+                </a>
+
                 <!-- Organize PDF -->
                 <a href="{{ route('tools.organize-pdf') }}" class="group relative flex h-full flex-col justify-between rounded-2xl border border-slate-200/90 bg-white p-6 shadow-xs transition duration-200 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-md hover:shadow-indigo-500/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 col-span-1 sm:col-span-1 lg:col-span-3">
                     <div class="flex flex-1 flex-col">

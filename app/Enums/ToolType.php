@@ -5,6 +5,7 @@ namespace App\Enums;
 enum ToolType: string
 {
     case JPG_TO_PDF = 'jpg-to-pdf';
+    case HEIC_TO_PDF = 'heic-to-pdf';
     case PDF_TO_JPG = 'pdf-to-jpg';
     case PDF_TO_PNG = 'pdf-to-png';
     case MERGE_PDF = 'merge-pdf';
@@ -33,6 +34,7 @@ enum ToolType: string
     {
         return match ($this) {
             self::JPG_TO_PDF => 'JPG to PDF',
+            self::HEIC_TO_PDF => 'HEIC to PDF',
             self::PDF_TO_JPG => 'PDF to JPG',
             self::PDF_TO_PNG => 'PDF to PNG',
             self::MERGE_PDF => 'Merge PDF',

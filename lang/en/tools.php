@@ -127,6 +127,20 @@ return array (
     'fit_image' => 'Fit to Image Size',
     'image_to_page' => 'Image :img → PDF Page :page',
   ),
+  'heic_to_pdf' =>
+  array (
+    'title' => 'HEIC to PDF',
+    'desc' => 'Convert iPhone and iPad HEIC/HEIF photos into high-quality PDF documents with custom order, page sizes, and margins.',
+    'action' => 'Convert HEIC to PDF',
+    'reorder_hint' => 'Use the arrows to arrange PDF pages in your preferred order.',
+    'page_size' => 'Page Size',
+    'orientation' => 'Orientation',
+    'margin' => 'Margin',
+    'margin_none' => 'No Margin',
+    'margin_small' => 'Small (10mm)',
+    'margin_big' => 'Large (20mm)',
+    'fit_image' => 'Fit to Image Size',
+  ),
   'pdf_to_jpg' => 
   array (
     'title' => 'PDF to JPG',

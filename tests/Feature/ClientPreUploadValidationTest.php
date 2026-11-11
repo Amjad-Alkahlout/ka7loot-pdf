@@ -15,7 +15,7 @@ class ClientPreUploadValidationTest extends TestCase
     {
         $this->assertSame(51200, config('fileprocessor.limits.max_pdf_size_kb'));
         $this->assertSame(25600, config('fileprocessor.limits.max_image_size_kb'));
-        $this->assertSame(20, config('fileprocessor.limits.max_batch_files'));
+        $this->assertSame(50, config('fileprocessor.limits.max_batch_files'));
         $this->assertSame(102400, config('fileprocessor.limits.max_total_batch_kb'));
 
         $pdfMb = (int) round(config('fileprocessor.limits.max_pdf_size_kb') / 1024);

@@ -23,7 +23,7 @@ class SeoAndMonetizationReadinessTest extends TestCase
         $this->assertStringContainsString('Sitemap: https://ka7lootpdf.me/sitemap.xml', $content);
     }
 
-    public function test_sitemap_xml_returns_valid_xml_with_all_22_canonical_production_urls(): void
+    public function test_sitemap_xml_returns_valid_xml_with_all_23_canonical_production_urls(): void
     {
         $response = $this->get('/sitemap.xml');
 
@@ -42,7 +42,7 @@ class SeoAndMonetizationReadinessTest extends TestCase
             $urls[] = (string) $urlElement->loc;
         }
 
-        $this->assertCount(22, $urls, 'Sitemap should have exactly 22 public URLs');
+        $this->assertCount(23, $urls, 'Sitemap should have exactly 23 public URLs');
 
         // Verify all URLs use production domain https://ka7lootpdf.me
         foreach ($urls as $loc) {
@@ -61,6 +61,7 @@ class SeoAndMonetizationReadinessTest extends TestCase
         $this->assertContains('https://ka7lootpdf.me/merge-pdf', $urls);
         $this->assertContains('https://ka7lootpdf.me/compress-pdf', $urls);
         $this->assertContains('https://ka7lootpdf.me/sign-pdf', $urls);
+        $this->assertContains('https://ka7lootpdf.me/heic-to-pdf', $urls);
         $this->assertContains('https://ka7lootpdf.me/privacy-policy', $urls);
         $this->assertContains('https://ka7lootpdf.me/terms-of-service', $urls);
     }

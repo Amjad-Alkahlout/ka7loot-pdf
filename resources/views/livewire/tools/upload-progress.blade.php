@@ -12,7 +12,7 @@
     $resolvedMaxSizeMb = (int) ($maxSizeMb ?? ($resolvedFileType === 'image'
         ? round(config('fileprocessor.limits.max_image_size_kb', 25600) / 1024)
         : round(config('fileprocessor.limits.max_pdf_size_kb', 51200) / 1024)));
-    $maxBatchFiles = (int) config('fileprocessor.limits.max_batch_files', 20);
+    $maxBatchFiles = (int) config('fileprocessor.limits.max_batch_files', 50);
     $maxTotalBatchMb = (int) round(config('fileprocessor.limits.max_total_batch_kb', 102400) / 1024);
 
     $sizeErrorMessage = $resolvedFileType === 'image'

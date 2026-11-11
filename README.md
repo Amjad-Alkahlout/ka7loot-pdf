@@ -59,7 +59,7 @@ Contact: [akahloot2005@gmail.com](mailto:akahloot2005@gmail.com)
 ## Prerequisites & Installation
 
 ### 1. Host Requirements
-- PHP 8.5.5+ with GD, Exif, Intl, Fileinfo, and Zip extensions enabled in `php.ini`.
+- PHP 8.5.5+ with GD, Exif, Intl, Fileinfo, and Zip extensions enabled in `php.ini`. Set `max_file_uploads = 50` so PHP accepts the application's 50-file batch limit.
 - MySQL 8.4+ database server.
 - Node.js 20+ & npm.
 - *(Optional for Deep PDF Compression)* Ghostscript (`gs` / `gswin64c.exe`):

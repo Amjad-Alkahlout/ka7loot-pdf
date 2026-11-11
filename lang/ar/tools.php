@@ -127,6 +127,20 @@ return array (
     'fit_image' => 'ملائمة حجم الصورة تلقائياً',
     'image_to_page' => 'صورة :img ← صفحة PDF :page',
   ),
+  'heic_to_pdf' =>
+  array (
+    'title' => 'تحويل HEIC إلى PDF',
+    'desc' => 'حوّل صور آيفون وآيباد بصيغة HEIC وHEIF إلى مستند PDF عالي الجودة مع ترتيب وحجم وهوامش مخصصة.',
+    'action' => 'تحويل HEIC إلى PDF',
+    'reorder_hint' => 'استخدم الأسهم لترتيب صفحات PDF بالطريقة التي تفضلها.',
+    'page_size' => 'حجم الصفحة',
+    'orientation' => 'الاتجاه',
+    'margin' => 'الهوامش',
+    'margin_none' => 'بدون هوامش',
+    'margin_small' => 'صغيرة (10 مم)',
+    'margin_big' => 'كبيرة (20 مم)',
+    'fit_image' => 'ملائمة حجم الصورة',
+  ),
   'pdf_to_jpg' => 
   array (
     'title' => 'تحويل PDF إلى JPG',

@@ -49,6 +49,25 @@ class FileSanitizationTest extends TestCase
         $this->assertMatchesRegularExpression('/^[0-9a-f\-]{36}\.jpg$/', $result['safe_filename']);
     }
 
+    public function test_valid_heic_is_detected_from_isobmff_brand(): void
+    {
+        $header = pack('N', 24) . 'ftyp' . 'heic' . pack('N', 0) . 'mif1' . str_repeat("\0", 8);
+        $file = UploadedFile::fake()->createWithContent('iphone.heic', $header . str_repeat('x', 100));
+
+        $result = $this->action->execute($file, ['image/heic']);
+
+        $this->assertSame('image/heic', $result['mime_type']);
+        $this->assertSame('heic', $result['extension']);
+    }
+
+    public function test_fake_heic_without_isobmff_header_is_rejected(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $file = UploadedFile::fake()->createWithContent('fake.heic', 'not an image');
+        $this->action->execute($file, ['image/heic']);
+    }
+
     public function test_extension_mismatch_is_rejected(): void
     {
         $this->expectException(ValidationException::class);

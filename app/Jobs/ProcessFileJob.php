@@ -18,6 +18,7 @@ use App\Services\Image\ImageCompressionService;
 use App\Services\Image\ImageConversionService;
 use App\Services\Image\ImageResizeService;
 use App\Services\Image\ImageTargetSizeCompressionService;
+use App\Services\Pdf\HeicToPdfService;
 use App\Services\Pdf\JpgToPdfService;
 use App\Services\Pdf\PdfCompressionService;
 use App\Services\Pdf\PdfMergeService;
@@ -60,6 +61,7 @@ class ProcessFileJob implements ShouldQueue
         ImageResizeService $imageResize,
         ImageConversionService $imageConvert,
         ArchiveGeneratorService $archiver,
+        HeicToPdfService $heicToPdf,
         ?PdfSigningService $pdfSign = null
     ): void {
         $lock = Cache::lock("process_file_job:{$this->fileJobId}", 120);
@@ -327,6 +329,34 @@ class ProcessFileJob implements ShouldQueue
                     ];
                     $resultMeta['engine'] = 'fpdi';
                     $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
+                    break;
+
+                case ToolType::HEIC_TO_PDF:
+                    $sources = array_map(fn($f) => $jobDir . DIRECTORY_SEPARATOR . $f, $meta['files'] ?? []);
+                    $totalInputBytes = array_sum(array_map('filesize', array_filter($sources, 'file_exists')));
+                    $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_heic.pdf';
+                    $pageSize = PageSize::tryFrom($meta['page_size'] ?? '') ?? PageSize::A4;
+                    $orientation = PageOrientation::tryFrom($meta['orientation'] ?? '') ?? PageOrientation::AUTO;
+                    $margin = (float) ($meta['margin'] ?? 10.0);
+
+                    $res = $heicToPdf->convertFilesToPdf(
+                        $sources,
+                        $outPath,
+                        $pageSize,
+                        $orientation,
+                        $margin,
+                        $jobDir . DIRECTORY_SEPARATOR . 'heic_converted'
+                    );
+                    $outputs[] = [
+                        'original_name' => $meta['output_filename'] ?? 'heic_images_document.pdf',
+                        'stored_filename' => 'output_heic.pdf',
+                        'mime_type' => 'application/pdf',
+                        'original_size_bytes' => $totalInputBytes,
+                        'processed_size_bytes' => $res['size_bytes'],
+                    ];
+                    $resultMeta['engine'] = 'heic-convert+fpdf';
+                    $resultMeta['engine_label'] = 'HEIC conversion and PDF generation';
+                    $resultMeta['total_pages'] = $res['total_pages'];
                     break;
 
                 case ToolType::COMPRESS_PDF:

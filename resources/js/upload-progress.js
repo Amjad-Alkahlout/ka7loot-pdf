@@ -6,7 +6,7 @@ export function fileUploadHandler(config = {}) {
         ? (globalLimits.maxImageSizeMb || 25)
         : (globalLimits.maxPdfSizeMb || 50));
     const maxSizeBytes = config.maxSizeBytes || (maxSizeMb * 1024 * 1024);
-    const maxBatchFiles = config.maxBatchFiles || globalLimits.maxBatchFiles || 20;
+    const maxBatchFiles = config.maxBatchFiles || globalLimits.maxBatchFiles || 50;
     const maxTotalBatchBytes = config.maxTotalBatchBytes || ((globalLimits.maxTotalBatchMb || 100) * 1024 * 1024);
     const maxTotalBatchMb = config.maxTotalBatchMb || globalLimits.maxTotalBatchMb || 100;
 

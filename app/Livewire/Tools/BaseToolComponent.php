@@ -71,7 +71,7 @@ abstract class BaseToolComponent extends Component
      */
     public function getMaxBatchFiles(): int
     {
-        return (int) config('fileprocessor.limits.max_batch_files', 20);
+        return (int) config('fileprocessor.limits.max_batch_files', 50);
     }
 
     /**

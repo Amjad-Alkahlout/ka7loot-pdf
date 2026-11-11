@@ -13,7 +13,7 @@ return [
     'limits' => [
         'max_pdf_size_kb'    => (int) env('FP_MAX_PDF_SIZE_KB', 51200),     // 50 MB
         'max_image_size_kb'  => (int) env('FP_MAX_IMAGE_SIZE_KB', 25600),   // 25 MB
-        'max_batch_files'    => (int) env('FP_MAX_BATCH_FILES', 20),
+        'max_batch_files'    => (int) env('FP_MAX_BATCH_FILES', 50),
         'max_total_batch_kb' => (int) env('FP_MAX_TOTAL_BATCH_KB', 102400), // 100 MB
     ],
 

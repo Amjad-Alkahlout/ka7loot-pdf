@@ -61,7 +61,7 @@ class MergePdfComponent extends BaseToolComponent
 
             foreach ($this->uploads as $upload) {
                 $sanitized = $sanitizer->execute($upload, ['application/pdf']);
-                $upload->storeAs("secure_temp/{$jobId}", $sanitized['safe_filename'], 'local');
+                $upload->storeAs(config('fileprocessor.storage.temp_path', 'secure_temp') . "/{$jobId}", $sanitized['safe_filename'], config('fileprocessor.storage.disk', 'local'));
                 $storedFiles[] = $sanitized['safe_filename'];
                 $totalBytes += $upload->getSize();
             }

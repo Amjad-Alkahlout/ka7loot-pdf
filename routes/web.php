@@ -8,6 +8,7 @@ use App\Livewire\Tools\CompressPdfComponent;
 use App\Livewire\Tools\ConvertImageComponent;
 use App\Livewire\Tools\EditPdfComponent;
 use App\Livewire\Tools\JpgToPdfComponent;
+use App\Livewire\Tools\HeicToPdfComponent;
 use App\Livewire\Tools\MergePdfComponent;
 use App\Livewire\Tools\OrganizePdfComponent;
 use App\Livewire\Tools\PdfToJpgComponent;
@@ -31,6 +32,7 @@ Route::get('/compress-pdf', CompressPdfComponent::class)->name('tools.compress-p
 Route::get('/pdf-to-jpg', PdfToJpgComponent::class)->name('tools.pdf-to-jpg');
 Route::get('/pdf-to-png', PdfToPngComponent::class)->name('tools.pdf-to-png');
 Route::get('/jpg-to-pdf', JpgToPdfComponent::class)->name('tools.jpg-to-pdf');
+Route::get('/heic-to-pdf', HeicToPdfComponent::class)->name('tools.heic-to-pdf');
 Route::get('/organize-pdf', OrganizePdfComponent::class)->name('tools.organize-pdf');
 Route::get('/protect-pdf', ProtectPdfComponent::class)->name('tools.protect-pdf');
 Route::get('/unlock-pdf', UnlockPdfComponent::class)->name('tools.unlock-pdf');
@@ -82,6 +84,7 @@ Route::get('/sitemap.xml', function () {
         'tools.pdf-to-jpg'        => ['path' => '/pdf-to-jpg',        'priority' => '0.8', 'changefreq' => 'weekly'],
         'tools.pdf-to-png'        => ['path' => '/pdf-to-png',        'priority' => '0.8', 'changefreq' => 'weekly'],
         'tools.jpg-to-pdf'        => ['path' => '/jpg-to-pdf',        'priority' => '0.8', 'changefreq' => 'weekly'],
+        'tools.heic-to-pdf'       => ['path' => '/heic-to-pdf',     'priority' => '0.8', 'changefreq' => 'weekly'],
         'tools.organize-pdf'      => ['path' => '/organize-pdf',      'priority' => '0.8', 'changefreq' => 'weekly'],
         'tools.protect-pdf'       => ['path' => '/protect-pdf',       'priority' => '0.8', 'changefreq' => 'weekly'],
         'tools.unlock-pdf'        => ['path' => '/unlock-pdf',        'priority' => '0.8', 'changefreq' => 'weekly'],

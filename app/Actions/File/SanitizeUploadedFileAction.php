@@ -18,6 +18,10 @@ class SanitizeUploadedFileAction
         'image/webp'      => ['webp'],
         'image/gif'       => ['gif'],
         'image/bmp'       => ['bmp'],
+        'image/heic'       => ['heic', 'heif'],
+        'image/heif'       => ['heic', 'heif'],
+        'image/heic-sequence' => ['heic', 'heif'],
+        'image/heif-sequence' => ['heic', 'heif'],
     ];
 
     /**
@@ -53,6 +57,13 @@ class SanitizeUploadedFileAction
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $detectedMime = finfo_file($finfo, $realPath) ?: $file->getMimeType();
         finfo_close($finfo);
+
+        if (
+            in_array($detectedMime, ['application/octet-stream', 'application/octetstream', 'video/mp4', 'application/mp4'], true)
+            || str_starts_with($detectedMime, 'image/')
+        ) {
+            $detectedMime = $this->detectHeicMime($realPath) ?? $detectedMime;
+        }
 
         // Normalize jpeg alias
         if ($detectedMime === 'image/pjpeg' || $detectedMime === 'image/jpg') {
@@ -119,5 +130,47 @@ class SanitizeUploadedFileAction
             'extension'     => $clientExt,
             'size_bytes'    => $sizeBytes,
         ];
+    }
+
+    /**
+     * Detect supported HEIC/HEIF brands in a valid ISO Base Media File header.
+     */
+    protected function detectHeicMime(string $path): ?string
+    {
+        $handle = @fopen($path, 'rb');
+        if (!$handle) {
+            return null;
+        }
+
+        try {
+            $header = fread($handle, 32);
+        } finally {
+            fclose($handle);
+        }
+
+        if ($header === false || strlen($header) < 12 || substr($header, 4, 4) !== 'ftyp') {
+            return null;
+        }
+
+        $brands = [];
+        $majorBrand = substr($header, 8, 4);
+        if ($majorBrand !== false) {
+            $brands[] = $majorBrand;
+        }
+
+        $minorAndCompatible = substr($header, 16);
+        for ($offset = 0; $offset + 4 <= strlen($minorAndCompatible); $offset += 4) {
+            $brands[] = substr($minorAndCompatible, $offset, 4);
+        }
+
+        foreach ($brands as $brand) {
+            if (in_array($brand, ['heic', 'heix', 'hevc', 'hevx', 'mif1', 'msf1'], true)) {
+                return str_starts_with($brand, 'mif') || str_starts_with($brand, 'msf')
+                    ? 'image/heif'
+                    : 'image/heic';
+            }
+        }
+
+        return null;
     }
 }
