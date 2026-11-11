@@ -18,7 +18,7 @@ Contact: [akahloot2005@gmail.com](mailto:akahloot2005@gmail.com)
    - **Image Compression & Optimization**: High-speed lossy and lossless compression for JPG, PNG, and WebP using Intervention Image v3 GD driver.
    - **Image Resizing & Conversion**: Pixels-based image resizing (`Contain`, `Cover`, `Fill`) and format conversion across JPG, PNG, WebP, GIF, BMP, HEIC, and HEIF. HEIC/HEIF files are decoded with the bundled Node.js/WASM worker before conversion.
    - **Daily Processing Quotas**: Guests can process 20 files per application day; Google-authenticated users can process 50. This is separate from the 50-file batch limit.
-   - **Google Sign-In**: Optional authentication uses only OpenID, profile, and email scopes. Google Drive access is never requested.
+   - **Clerk Authentication**: Optional authentication supports email/password with email verification. Google sign-in can be enabled as a Clerk social connection.
 
 2. **Dual-Engine PDF Compression Transparency**:
    - **Deep Compression (Ghostscript)**: Employs Ghostscript (`gs`) stream downsampling, font subsetting, and flate recompression when available on the host environment.
@@ -100,9 +100,36 @@ Verify host capabilities and external binary discovery:
 php artisan app:check-system-binaries
 ```
 
-### 4. Configure Google Sign-In and Daily Quotas
+### 4. Configure Clerk Authentication and Daily Quotas
 
-Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in `.env`, then register the callback URL with Google Cloud OAuth credentials. The application requests only `openid`, `email`, and `profile` scopes and does not request Google Drive access.
+The application uses Clerk for account creation, email/password authentication, email verification, and optional Google sign-in. Google credentials are configured only in Clerk; this Laravel application does not implement Google OAuth directly.
+
+Set the following deployment variables without committing secret values:
+
+```dotenv
+CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_JWT_KEY="-----BEGIN PUBLIC KEY-----..."
+CLERK_ISSUER=https://your-instance.clerk.accounts.dev
+CLERK_AUTHORIZED_PARTIES=https://your-domain.example
+CLERK_SECRET_KEY=sk_test_...
+CLERK_API_URL=https://api.clerk.com/v1
+```
+
+In the Clerk Dashboard:
+
+1. Enable email/password sign-up and require email verification.
+2. Add the local origins (`http://localhost:8000` and, if used, `http://127.0.0.1:8000`) and production origin under allowed domains/origins.
+3. Optionally enable Google under **Social connections**. Google OAuth credentials and consent settings belong in Clerk.
+4. Configure the Clerk session token issuer and public JWT key used by the Laravel server.
+
+The dashboard's JavaScript/Vite setup guide is for a new standalone Vite app. Do not
+run `npm create vite` or add a second Clerk bootstrap in this Laravel application:
+the existing `resources/js/app.js` already initializes Clerk and the Blade layout
+passes the publishable key to it. Copy the publishable key from Clerk into
+`CLERK_PUBLISHABLE_KEY`; it is intentionally not required as a separate
+`VITE_CLERK_PUBLISHABLE_KEY` variable.
+
+Laravel verifies the Clerk session token server-side on each web and Livewire request, then maps the verified Clerk user ID to the local `users.clerk_id` column. Only the stable Clerk ID, verified email, display name, and verification timestamp are stored locally. Passwords and provider tokens are never stored. After changing environment values, run `php artisan config:clear` and `php artisan config:cache`.
 
 Daily limits are configurable with `FP_DAILY_GUEST_FILES` (default `20`) and `FP_DAILY_AUTH_FILES` (default `50`). They apply across all processing tools. The existing `FP_MAX_BATCH_FILES=50` setting remains the per-request batch limit.
 
@@ -111,17 +138,28 @@ Daily limits are configurable with `FP_DAILY_GUEST_FILES` (default `20`) and `FP
 ## Running the Platform
 
 ### Local Development
-Run the development servers concurrently:
+For the simplest local run after `npm run build`, remove any stale Vite hot
+file and run Laravel plus the queue worker:
+```powershell
+Remove-Item public/hot -ErrorAction SilentlyContinue
+php artisan serve
+php artisan queue:work
+```
+
+When actively changing JavaScript or CSS, use Vite instead of the built assets:
 ```bash
-# Terminal 1: Laravel Server
+# Terminal 1: Laravel server
 php artisan serve
 
-# Terminal 2: Queue Worker (listens on default queue)
+# Terminal 2: Queue worker
 php artisan queue:work
 
-# Terminal 3: Asset Dev Server (if modifying styles)
+# Terminal 3: Vite dev server
 npm run dev
 ```
+
+Do not leave `public/hot` from a stopped Vite process; Laravel will continue
+emitting its dev-server URLs until that file is removed.
 
 ### Automated Pruning & Scheduled Tasks
 Ensure the Laravel scheduler runs periodically to purge expired files:

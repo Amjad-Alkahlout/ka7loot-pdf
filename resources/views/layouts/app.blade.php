@@ -146,6 +146,15 @@
         };
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    <script>
+        window.clerkConfig = {
+            publishableKey: @json(config('clerk.publishable_key')),
+            csrfToken: @json(csrf_token()),
+            syncUrl: @json(route('auth.sync')),
+            logoutUrl: @json(route('logout')),
+            syncErrorMessage: @json(__('ui.clerk_sync_failed')),
+        };
+    </script>
     @livewireStyles
     <style>
         body {
@@ -185,15 +194,15 @@
                 <span class="hidden lg:inline text-xs font-semibold text-slate-500">
                     {{ __('ui.daily_quota_short', ['remaining' => $dailyQuota['remaining'], 'limit' => $dailyQuota['limit']]) }}
                 </span>
-                @auth
-                    <span class="hidden sm:inline text-xs font-semibold text-slate-600">{{ auth()->user()->name }}</span>
-                    <form method="POST" action="{{ route('logout') }}">
-                        @csrf
-                        <button type="submit" class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.sign_out') }}</button>
-                    </form>
-                @else
-                    <a href="{{ route('auth.google') }}" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">{{ __('ui.sign_in_google') }}</a>
-                @endauth
+                <div id="clerk-auth-controls" class="flex items-center gap-2" data-authenticated="{{ auth()->check() ? 'true' : 'false' }}">
+                    @auth
+                        <span class="hidden sm:inline text-xs font-semibold text-slate-600">{{ auth()->user()->name }}</span>
+                        <button type="button" data-clerk-sign-out class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.sign_out') }}</button>
+                    @else
+                        <button type="button" data-clerk-sign-in class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">{{ __('ui.sign_in') }}</button>
+                        <button type="button" data-clerk-sign-up class="hidden sm:inline text-xs font-semibold text-indigo-700 hover:text-indigo-900">{{ __('ui.sign_up') }}</button>
+                    @endauth
+                </div>
                 <a href="{{ route('locale.switch', app()->getLocale() === 'en' ? 'ar' : 'en') }}"
                    class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition">
                     <svg class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -205,11 +214,24 @@
         </div>
     </header>
 
+    <div id="clerk-auth-error" class="hidden mx-auto mt-4 w-full max-w-7xl rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert" aria-live="assertive"></div>
+
     <!-- Monetization / Future AdSense Unit: Top Responsive Placement (Non-obstructive) -->
     <div id="ad-slot-header" class="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center empty:hidden" data-ad-slot="header" aria-hidden="true"></div>
 
     <!-- Main Content -->
     <main class="flex-1">
+        @if (isset($errors) && $errors->any())
+            <div class="mx-auto mt-6 w-full max-w-7xl px-4 sm:px-6 lg:px-8" role="alert">
+                <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800 shadow-sm">
+                    <ul class="list-disc space-y-1 ps-5">
+                        @foreach ($errors->all() as $error)
+                            <li>{{ $error }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+            </div>
+        @endif
         {{ $slot }}
     </main>
 

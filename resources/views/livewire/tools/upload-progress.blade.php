@@ -25,7 +25,7 @@
     <div class="flex flex-wrap items-center justify-between gap-2">
         <span>{{ __('ui.daily_quota_remaining', ['remaining' => $dailyQuota['remaining'], 'limit' => $dailyQuota['limit']]) }}</span>
         @if($dailyQuota['guest'])
-            <a href="{{ route('auth.google') }}" class="font-bold text-indigo-700 hover:underline">{{ __('ui.sign_in_for_more') }}</a>
+            <button type="button" data-clerk-sign-in class="font-bold text-indigo-700 hover:underline">{{ __('ui.sign_in_for_more') }}</button>
         @endif
     </div>
 </div>

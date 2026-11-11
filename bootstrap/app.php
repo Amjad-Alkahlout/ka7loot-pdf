@@ -1,6 +1,8 @@
 <?php
 
+use App\Http\Middleware\ResolveClerkUser;
 use App\Http\Middleware\SetLocaleMiddleware;
+use Illuminate\Auth\Middleware\Authenticate;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -20,6 +22,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(append: [
             SetLocaleMiddleware::class,
+            ResolveClerkUser::class,
+        ]);
+        $middleware->priority([
+            SetLocaleMiddleware::class,
+            ResolveClerkUser::class,
+            Authenticate::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

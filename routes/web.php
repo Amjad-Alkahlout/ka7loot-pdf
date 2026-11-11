@@ -1,7 +1,7 @@
 <?php
 
 use App\Http\Controllers\FileDownloadController;
-use App\Http\Controllers\GoogleAuthController;
+use App\Http\Controllers\ClerkAuthController;
 use App\Http\Controllers\PublicShareDownloadController;
 use App\Livewire\Tools\ChangeImageBackgroundComponent;
 use App\Livewire\Tools\CompressImageComponent;
@@ -26,9 +26,12 @@ Route::get('/', function () {
     return view('pages.home');
 })->name('home');
 
-Route::get('/auth/google', [GoogleAuthController::class, 'redirect'])->name('auth.google');
-Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('auth.google.callback');
-Route::post('/logout', [GoogleAuthController::class, 'logout'])->middleware('auth')->name('logout');
+Route::post('/auth/logout', [ClerkAuthController::class, 'logout'])
+    ->middleware('auth')
+    ->name('logout');
+Route::post('/auth/sync', [ClerkAuthController::class, 'sync'])
+    ->middleware('auth')
+    ->name('auth.sync');
 
 // PDF Tools
 Route::get('/merge-pdf', MergePdfComponent::class)->name('tools.merge-pdf');
