@@ -129,6 +129,12 @@ passes the publishable key to it. Copy the publishable key from Clerk into
 `CLERK_PUBLISHABLE_KEY`; it is intentionally not required as a separate
 `VITE_CLERK_PUBLISHABLE_KEY` variable.
 
+The application also loads Clerk's hosted UI bundle from the Frontend API domain
+encoded in the publishable key before calling `openSignIn` or `openSignUp`.
+Allow that domain in browser security policies if you add a Content Security
+Policy; `script-src` must allow the Clerk Frontend API domain and `connect-src`
+must allow the Clerk API endpoints.
+
 Laravel verifies the Clerk session token server-side on each web and Livewire request, then maps the verified Clerk user ID to the local `users.clerk_id` column. Only the stable Clerk ID, verified email, display name, and verification timestamp are stored locally. Passwords and provider tokens are never stored. After changing environment values, run `php artisan config:clear` and `php artisan config:cache`.
 
 Daily limits are configurable with `FP_DAILY_GUEST_FILES` (default `20`) and `FP_DAILY_AUTH_FILES` (default `50`). They apply across all processing tools. The existing `FP_MAX_BATCH_FILES=50` setting remains the per-request batch limit.
