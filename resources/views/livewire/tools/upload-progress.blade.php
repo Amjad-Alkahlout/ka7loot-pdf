@@ -8,6 +8,7 @@
 ])
 
 @php
+    $dailyQuota = app(\App\Services\File\DailyFileQuotaService::class)->summary();
     $resolvedFileType = $fileType ?? (str_contains($accept, 'image') ? 'image' : 'pdf');
     $resolvedMaxSizeMb = (int) ($maxSizeMb ?? ($resolvedFileType === 'image'
         ? round(config('fileprocessor.limits.max_image_size_kb', 25600) / 1024)
@@ -19,6 +20,15 @@
         ? __('ui.error_image_preupload_too_large', ['size' => $resolvedMaxSizeMb])
         : __('ui.error_file_too_large', ['size' => $resolvedMaxSizeMb]);
 @endphp
+
+<div class="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 text-sm text-indigo-950">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+        <span>{{ __('ui.daily_quota_remaining', ['remaining' => $dailyQuota['remaining'], 'limit' => $dailyQuota['limit']]) }}</span>
+        @if($dailyQuota['guest'])
+            <a href="{{ route('auth.google') }}" class="font-bold text-indigo-700 hover:underline">{{ __('ui.sign_in_for_more') }}</a>
+        @endif
+    </div>
+</div>
 
 <div x-data="fileUploadHandler({
         propertyName: '{{ $propertyName }}',

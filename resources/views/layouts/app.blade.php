@@ -181,6 +181,19 @@
 
             <!-- Language Switcher & Security Pill -->
             <div class="flex items-center gap-3">
+                @php($dailyQuota = app(\App\Services\File\DailyFileQuotaService::class)->summary())
+                <span class="hidden lg:inline text-xs font-semibold text-slate-500">
+                    {{ __('ui.daily_quota_short', ['remaining' => $dailyQuota['remaining'], 'limit' => $dailyQuota['limit']]) }}
+                </span>
+                @auth
+                    <span class="hidden sm:inline text-xs font-semibold text-slate-600">{{ auth()->user()->name }}</span>
+                    <form method="POST" action="{{ route('logout') }}">
+                        @csrf
+                        <button type="submit" class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.sign_out') }}</button>
+                    </form>
+                @else
+                    <a href="{{ route('auth.google') }}" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">{{ __('ui.sign_in_google') }}</a>
+                @endauth
                 <a href="{{ route('locale.switch', app()->getLocale() === 'en' ? 'ar' : 'en') }}"
                    class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition">
                     <svg class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">

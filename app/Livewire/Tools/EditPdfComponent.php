@@ -5,9 +5,11 @@ namespace App\Livewire\Tools;
 use App\Actions\File\SanitizeUploadedFileAction;
 use App\Enums\JobStatus;
 use App\Enums\ToolType;
+use App\Exceptions\UnsupportedPdfFontException;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
 use App\Models\ToolUsage;
+use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfAnnotationApplierService;
 use App\Services\Pdf\PdfiumTextEditorService;
@@ -31,49 +33,81 @@ class EditPdfComponent extends BaseToolComponent
     public $upload;
 
     public string $filename = '';
+
     public int $fileSizeBytes = 0;
+
     public string $fileSizeFormatted = '';
+
     public ?string $storedSourcePath = null;
+
     public ?string $jobId = null;
+
     public ?FileJob $completedJob = null;
 
     // Document inspection & capabilities
     public int $pageCount = 0;
+
     public int $currentPage = 1;
+
     public bool $isScanned = false;
+
     public bool $isSigned = false;
+
     public bool $isEncrypted = false;
+
     public bool $passwordRequired = false;
+
     public string $password = '';
+
     public ?string $passwordError = null;
+
     public int $totalTextObjects = 0;
+
     public int $totalTextGroups = 0;
+
     public array $pageDimensions = []; // ['width' => float, 'height' => float, 'rotation' => int]
+
     public array $allPageDimensionsByPage = []; // page_index => ['width' => float, 'height' => float, 'rotation' => int]
+
     public array $pageNativeEditable = []; // page_number (1-based) => bool
+
     public array $pageHasType3 = [];       // page_number (1-based) => bool
+
     public array $pageWarnings = [];       // page_number (1-based) => string|null
 
     // Previews & navigation
     public array $pagePreviews = []; // page => base64
+
     public array $pageThumbnails = []; // page => base64
+
     public int $zoomLevel = 100; // 50, 75, 100, 125, 150
 
     // Text objects & active selection
     public array $allTextObjectsByPage = []; // page_index => text_objects
+
     public array $allTextGroupsByPage = [];  // page_index => text_groups
+
     public ?string $selectedObjectId = null;
+
     public ?array $selectedObject = null;
+
     public ?string $selectedGroupId = null;
+
     public ?array $selectedGroup = null;
+
     public string $editText = '';
+
     public bool $autoFit = true;
+
     public ?float $editFontSize = null;
+
     public string $editColor = '#000000';
 
     // In-memory manifests
     public array $editManifest = []; // id => [page, page_index, group_id, child_object_ids, object_id, target_text, replacement_text, auto_fit, bbox]
+
     public array $addedTexts = [];   // id => [page, text, x_ratio, y_ratio, font_size, color]
+
     public array $addedShapes = [];  // id => [page, type, x_ratio, y_ratio, width_ratio, height_ratio, stroke_color, fill_color]
 
     // UI tabs & states
@@ -106,7 +140,7 @@ class EditPdfComponent extends BaseToolComponent
 
     public function analyzeDocument(?string $password = null): void
     {
-        if (!$this->storedSourcePath || !file_exists($this->storedSourcePath)) {
+        if (! $this->storedSourcePath || ! file_exists($this->storedSourcePath)) {
             return;
         }
 
@@ -142,8 +176,8 @@ class EditPdfComponent extends BaseToolComponent
                 $this->pageWarnings[$pageNum] = $pData['warning']['message'] ?? ($pData['editable_reason'] ?? null);
 
                 $dims = [
-                    'width'    => (float) ($pData['width'] ?? 595.28),
-                    'height'   => (float) ($pData['height'] ?? 841.89),
+                    'width' => (float) ($pData['width'] ?? 595.28),
+                    'height' => (float) ($pData['height'] ?? 841.89),
                     'rotation' => (int) ($pData['rotation'] ?? 0),
                 ];
                 $this->allPageDimensionsByPage[$pIdx] = $dims;
@@ -180,7 +214,7 @@ class EditPdfComponent extends BaseToolComponent
                 $this->jobStatus = 'failed';
             }
         } catch (Throwable $e) {
-            Log::error("EditPdfComponent: inspection failed: " . $e->getMessage());
+            Log::error('EditPdfComponent: inspection failed: '.$e->getMessage());
             $this->errorMessage = $e->getMessage();
             $this->jobStatus = 'failed';
         }
@@ -207,7 +241,7 @@ class EditPdfComponent extends BaseToolComponent
 
     public function loadPagePreview(int $page): void
     {
-        if (isset($this->pagePreviews[$page]) || !$this->storedSourcePath) {
+        if (isset($this->pagePreviews[$page]) || ! $this->storedSourcePath) {
             return;
         }
 
@@ -218,13 +252,13 @@ class EditPdfComponent extends BaseToolComponent
                 $this->pagePreviews[$page] = $preview;
             }
         } catch (Throwable $e) {
-            Log::warning("EditPdfComponent: Could not generate page preview: " . $e->getMessage());
+            Log::warning('EditPdfComponent: Could not generate page preview: '.$e->getMessage());
         }
     }
 
     public function loadThumbnails(): void
     {
-        if (!empty($this->pageThumbnails) || !$this->storedSourcePath) {
+        if (! empty($this->pageThumbnails) || ! $this->storedSourcePath) {
             return;
         }
 
@@ -232,7 +266,7 @@ class EditPdfComponent extends BaseToolComponent
             $thumbService = app(PdfThumbnailService::class);
             $this->pageThumbnails = $thumbService->generateThumbnails($this->storedSourcePath, min(20, $this->pageCount), 150);
         } catch (Throwable $e) {
-            Log::warning("EditPdfComponent: Thumbnail generation failed: " . $e->getMessage());
+            Log::warning('EditPdfComponent: Thumbnail generation failed: '.$e->getMessage());
         }
     }
 
@@ -333,6 +367,7 @@ class EditPdfComponent extends BaseToolComponent
         foreach ($groups as $grp) {
             if ($grp['group_id'] === $objectId) {
                 $this->selectTextGroup($objectId);
+
                 return;
             }
         }
@@ -377,7 +412,7 @@ class EditPdfComponent extends BaseToolComponent
     public function nextTextItem(): void
     {
         $pIdx = $this->currentPage - 1;
-        $items = !empty($this->allTextGroupsByPage[$pIdx])
+        $items = ! empty($this->allTextGroupsByPage[$pIdx])
             ? $this->allTextGroupsByPage[$pIdx]
             : ($this->allTextObjectsByPage[$pIdx] ?? []);
 
@@ -386,6 +421,7 @@ class EditPdfComponent extends BaseToolComponent
                 $this->goToPage($this->currentPage + 1);
                 $this->nextTextItem();
             }
+
             return;
         }
 
@@ -422,7 +458,7 @@ class EditPdfComponent extends BaseToolComponent
     public function prevTextItem(): void
     {
         $pIdx = $this->currentPage - 1;
-        $items = !empty($this->allTextGroupsByPage[$pIdx])
+        $items = ! empty($this->allTextGroupsByPage[$pIdx])
             ? $this->allTextGroupsByPage[$pIdx]
             : ($this->allTextObjectsByPage[$pIdx] ?? []);
 
@@ -431,6 +467,7 @@ class EditPdfComponent extends BaseToolComponent
                 $this->goToPage($this->currentPage - 1);
                 $this->prevTextItem();
             }
+
             return;
         }
 
@@ -458,10 +495,10 @@ class EditPdfComponent extends BaseToolComponent
         } elseif ($this->currentPage > 1) {
             $this->goToPage($this->currentPage - 1);
             $pIdxPrev = $this->currentPage - 1;
-            $prevItems = !empty($this->allTextGroupsByPage[$pIdxPrev])
+            $prevItems = ! empty($this->allTextGroupsByPage[$pIdxPrev])
                 ? $this->allTextGroupsByPage[$pIdxPrev]
                 : ($this->allTextObjectsByPage[$pIdxPrev] ?? []);
-            if (!empty($prevItems)) {
+            if (! empty($prevItems)) {
                 $lastItem = end($prevItems);
                 if (isset($lastItem['group_id'])) {
                     $this->selectTextGroup($lastItem['group_id']);
@@ -486,8 +523,9 @@ class EditPdfComponent extends BaseToolComponent
 
     public function saveCurrentEdit(): void
     {
-        if (!$this->isCurrentPageNativeEditable()) {
+        if (! $this->isCurrentPageNativeEditable()) {
             $this->addError('edit_text', __('tools.edit_pdf.error_type3_fonts'));
+
             return;
         }
 
@@ -507,29 +545,30 @@ class EditPdfComponent extends BaseToolComponent
                 || (abs($fontSize - $origFontSize) > 0.01)
                 || ($this->editColor !== '#000000');
 
-            if (!$hasChanges) {
+            if (! $hasChanges) {
                 unset($this->editManifest[$groupId]);
             } else {
                 $this->editManifest[$groupId] = [
-                    'id'                   => $groupId,
-                    'group_id'             => $groupId,
-                    'object_id'            => $this->selectedGroup['child_object_ids'][0] ?? $groupId,
-                    'page'                 => $this->currentPage,
-                    'page_index'           => $this->currentPage - 1,
-                    'child_object_ids'     => $this->selectedGroup['child_object_ids'] ?? [],
+                    'id' => $groupId,
+                    'group_id' => $groupId,
+                    'object_id' => $this->selectedGroup['child_object_ids'][0] ?? $groupId,
+                    'page' => $this->currentPage,
+                    'page_index' => $this->currentPage - 1,
+                    'child_object_ids' => $this->selectedGroup['child_object_ids'] ?? [],
                     'child_object_indices' => $this->selectedGroup['child_object_indices'] ?? [],
-                    'original_text'        => $original,
-                    'target_text'          => $original,
-                    'replacement_text'     => $this->editText,
-                    'auto_fit'             => $this->autoFit,
-                    'font_size'            => $fontSize,
-                    'color'                => $this->editColor,
-                    'direction'            => $this->selectedGroup['direction'] ?? null,
-                    'bbox'                 => $this->selectedGroup['bounding_box'] ?? [],
+                    'original_text' => $original,
+                    'target_text' => $original,
+                    'replacement_text' => $this->editText,
+                    'auto_fit' => $this->autoFit,
+                    'font_size' => $fontSize,
+                    'color' => $this->editColor,
+                    'direction' => $this->selectedGroup['direction'] ?? null,
+                    'bbox' => $this->selectedGroup['bounding_box'] ?? [],
                 ];
             }
 
             $this->cancelEdit();
+
             return;
         }
 
@@ -543,25 +582,25 @@ class EditPdfComponent extends BaseToolComponent
                 || (abs($fontSize - $origFontSize) > 0.01)
                 || ($this->editColor !== '#000000');
 
-            if (!$hasChanges) {
+            if (! $hasChanges) {
                 unset($this->editManifest[$objId]);
             } else {
                 $this->editManifest[$objId] = [
-                    'id'                   => $objId,
-                    'group_id'             => $this->selectedGroup['group_id'] ?? '',
-                    'page'                 => $this->currentPage,
-                    'page_index'           => $this->currentPage - 1,
-                    'object_id'            => $objId,
-                    'child_object_ids'     => $this->selectedGroup['child_object_ids'] ?? [$objId],
+                    'id' => $objId,
+                    'group_id' => $this->selectedGroup['group_id'] ?? '',
+                    'page' => $this->currentPage,
+                    'page_index' => $this->currentPage - 1,
+                    'object_id' => $objId,
+                    'child_object_ids' => $this->selectedGroup['child_object_ids'] ?? [$objId],
                     'child_object_indices' => $this->selectedGroup['child_object_indices'] ?? [],
-                    'original_text'        => $original,
-                    'target_text'          => $original,
-                    'replacement_text'     => $this->editText,
-                    'auto_fit'             => $this->autoFit,
-                    'font_size'            => $fontSize,
-                    'color'                => $this->editColor,
-                    'direction'            => $this->selectedGroup['direction'] ?? null,
-                    'bbox'                 => $this->selectedObject['bbox'] ?? [],
+                    'original_text' => $original,
+                    'target_text' => $original,
+                    'replacement_text' => $this->editText,
+                    'auto_fit' => $this->autoFit,
+                    'font_size' => $fontSize,
+                    'color' => $this->editColor,
+                    'direction' => $this->selectedGroup['direction'] ?? null,
+                    'bbox' => $this->selectedObject['bbox'] ?? [],
                 ];
             }
 
@@ -575,7 +614,7 @@ class EditPdfComponent extends BaseToolComponent
     public function hasUnsavedActiveEdit(): bool
     {
         $activeItem = $this->selectedGroup ?? $this->selectedObject;
-        if (!$activeItem) {
+        if (! $activeItem) {
             return false;
         }
 
@@ -597,6 +636,7 @@ class EditPdfComponent extends BaseToolComponent
         if ($this->hasUnsavedActiveEdit()) {
             $count++;
         }
+
         return $count;
     }
 
@@ -605,7 +645,7 @@ class EditPdfComponent extends BaseToolComponent
      */
     public function computeEffectiveFontSize(float $baseFontSize, string $targetText, string $replacementText, bool $autoFit): float
     {
-        if (!$autoFit) {
+        if (! $autoFit) {
             return max(6.0, $baseFontSize);
         }
 
@@ -658,15 +698,15 @@ class EditPdfComponent extends BaseToolComponent
             $this->jobStatus = 'ready';
         }
 
-        $id = 'txt_' . Str::random(8);
+        $id = 'txt_'.Str::random(8);
         $this->addedTexts[$id] = [
-            'id'        => $id,
-            'page'      => $this->currentPage,
-            'text'      => 'Sample Text',
-            'x_ratio'   => 0.25,
-            'y_ratio'   => 0.25,
+            'id' => $id,
+            'page' => $this->currentPage,
+            'text' => 'Sample Text',
+            'x_ratio' => 0.25,
+            'y_ratio' => 0.25,
             'font_size' => 14,
-            'color'     => '#000000',
+            'color' => '#000000',
         ];
         $this->activeTab = 'add_text';
     }
@@ -704,17 +744,17 @@ class EditPdfComponent extends BaseToolComponent
             $this->jobStatus = 'ready';
         }
 
-        $id = 'shp_' . Str::random(8);
+        $id = 'shp_'.Str::random(8);
         $this->addedShapes[$id] = [
-            'id'           => $id,
-            'page'         => $this->currentPage,
-            'type'         => in_array($type, ['rect', 'line', 'highlight'], true) ? $type : 'rect',
-            'x_ratio'      => 0.20,
-            'y_ratio'      => 0.20,
-            'width_ratio'  => 0.30,
+            'id' => $id,
+            'page' => $this->currentPage,
+            'type' => in_array($type, ['rect', 'line', 'highlight'], true) ? $type : 'rect',
+            'x_ratio' => 0.20,
+            'y_ratio' => 0.20,
+            'width_ratio' => 0.30,
             'height_ratio' => $type === 'line' ? 0.00 : 0.05,
             'stroke_color' => $type === 'highlight' ? '#eab308' : '#2563eb',
-            'fill_color'   => $type === 'highlight' ? '#fde047' : 'none',
+            'fill_color' => $type === 'highlight' ? '#fde047' : 'none',
         ];
         $this->activeTab = 'shapes';
     }
@@ -772,17 +812,20 @@ class EditPdfComponent extends BaseToolComponent
         $this->process(
             app(FileStorageManager::class),
             app(PdfiumTextEditorService::class),
-            app(PdfAnnotationApplierService::class)
+            app(PdfAnnotationApplierService::class),
+            app(DailyFileQuotaService::class)
         );
     }
 
     public function process(
         FileStorageManager $storage,
         PdfiumTextEditorService $pdfium,
-        PdfAnnotationApplierService $annotationApplier
+        PdfAnnotationApplierService $annotationApplier,
+        DailyFileQuotaService $quota
     ): void {
-        if (!$this->storedSourcePath || !file_exists($this->storedSourcePath)) {
+        if (! $this->storedSourcePath || ! file_exists($this->storedSourcePath)) {
             $this->addError('upload', 'No valid PDF document uploaded.');
+
             return;
         }
 
@@ -792,14 +835,15 @@ class EditPdfComponent extends BaseToolComponent
 
         if (empty($this->editManifest) && empty($this->addedTexts) && empty($this->addedShapes)) {
             $this->addError('manifest', 'No modifications queued to apply.');
+
             return;
         }
 
         // Concurrency lock to protect against simultaneous double-submissions for the same edit session
-        $lockKey = 'edit_pdf_process:' . ($this->jobId ?? 'global');
+        $lockKey = 'edit_pdf_process:'.($this->jobId ?? 'global');
         $lock = Cache::lock($lockKey, 120);
 
-        if (!$lock->get()) {
+        if (! $lock->get()) {
             if ($this->fileJobId) {
                 $existingJob = FileJob::find($this->fileJobId);
                 if ($existingJob && $existingJob->status === JobStatus::COMPLETED) {
@@ -807,6 +851,7 @@ class EditPdfComponent extends BaseToolComponent
                     $this->jobStatus = 'completed';
                 }
             }
+
             return;
         }
 
@@ -817,6 +862,7 @@ class EditPdfComponent extends BaseToolComponent
                 $this->completedJob = $existingJob;
                 $this->jobStatus = 'completed';
                 $this->releaseLockSafely($lock);
+
                 return;
             }
         }
@@ -828,6 +874,7 @@ class EditPdfComponent extends BaseToolComponent
         $job = null;
 
         try {
+            $quota->assertAvailable();
             // Security Validation: Verify that every group_id or object_id belongs to the currently inspected document
             $inspection = $pdfium->inspectDocument($this->storedSourcePath, $this->password ?: null);
             $validObjectsMap = [];
@@ -844,7 +891,7 @@ class EditPdfComponent extends BaseToolComponent
                     if ($oid) {
                         $validObjectsMap[$oid] = [
                             'page_index' => $pIdx,
-                            'text'       => (string) ($to['text'] ?? ''),
+                            'text' => (string) ($to['text'] ?? ''),
                         ];
                     }
                 }
@@ -852,8 +899,8 @@ class EditPdfComponent extends BaseToolComponent
                     $gid = $tg['group_id'] ?? null;
                     if ($gid) {
                         $validGroupsMap[$gid] = [
-                            'page_index'       => $pIdx,
-                            'text'             => (string) ($tg['text'] ?? ''),
+                            'page_index' => $pIdx,
+                            'text' => (string) ($tg['text'] ?? ''),
                             'child_object_ids' => $tg['child_object_ids'] ?? [],
                         ];
                     }
@@ -862,7 +909,9 @@ class EditPdfComponent extends BaseToolComponent
 
             $uniqueManifest = [];
             foreach ($this->editManifest as $item) {
-                if (!is_array($item)) continue;
+                if (! is_array($item)) {
+                    continue;
+                }
                 $key = $item['group_id'] ?? ($item['object_id'] ?? ($item['id'] ?? null));
                 if ($key) {
                     $uniqueManifest[$key] = $item;
@@ -870,10 +919,10 @@ class EditPdfComponent extends BaseToolComponent
             }
 
             foreach ($uniqueManifest as $item) {
-                $hasGroup = !empty($item['group_id']) && isset($validGroupsMap[$item['group_id']]);
-                $hasObject = !empty($item['object_id']) && isset($validObjectsMap[$item['object_id']]);
+                $hasGroup = ! empty($item['group_id']) && isset($validGroupsMap[$item['group_id']]);
+                $hasObject = ! empty($item['object_id']) && isset($validObjectsMap[$item['object_id']]);
 
-                if (!$hasGroup && !$hasObject) {
+                if (! $hasGroup && ! $hasObject) {
                     $ref = $item['group_id'] ?? ($item['object_id'] ?? ($item['id'] ?? 'unknown'));
                     throw new RuntimeException("Security violation: Invalid or tampered text reference: {$ref}");
                 }
@@ -901,7 +950,7 @@ class EditPdfComponent extends BaseToolComponent
                 $x = (float) ($txt['x_ratio'] ?? 0);
                 $y = (float) ($txt['y_ratio'] ?? 0);
                 if ($x < -0.2 || $x > 1.2 || $y < -0.2 || $y > 1.2) {
-                    throw new RuntimeException("Security violation: Coordinates out of bounds for added text.");
+                    throw new RuntimeException('Security violation: Coordinates out of bounds for added text.');
                 }
             }
 
@@ -911,7 +960,7 @@ class EditPdfComponent extends BaseToolComponent
                     throw new RuntimeException("Security violation: Target page out of range for added shape: {$p}");
                 }
                 $type = (string) ($shp['type'] ?? '');
-                if (!in_array($type, ['rect', 'line', 'highlight'], true)) {
+                if (! in_array($type, ['rect', 'line', 'highlight'], true)) {
                     throw new RuntimeException("Security violation: Invalid shape type: {$type}");
                 }
             }
@@ -919,8 +968,8 @@ class EditPdfComponent extends BaseToolComponent
             // Security Precondition: ensure no native edit targets an unsafe page (Single authoritative validation path)
             foreach ($this->editManifest as $item) {
                 $p = (int) ($item['page'] ?? (($item['page_index'] ?? 0) + 1));
-                if (!($this->pageNativeEditable[$p] ?? true)) {
-                    throw new \App\Exceptions\UnsupportedPdfFontException(
+                if (! ($this->pageNativeEditable[$p] ?? true)) {
+                    throw new UnsupportedPdfFontException(
                         "Cannot perform native text edit on page {$p}: page contains unsupported Type 3 embedded fonts.",
                         $p,
                         'Type3'
@@ -928,7 +977,7 @@ class EditPdfComponent extends BaseToolComponent
                 }
             }
 
-            $outputFilename = 'edited_' . pathinfo($this->filename, PATHINFO_FILENAME) . '.pdf';
+            $outputFilename = 'edited_'.pathinfo($this->filename, PATHINFO_FILENAME).'.pdf';
 
             // Retry support
             $isRetry = false;
@@ -938,8 +987,8 @@ class EditPdfComponent extends BaseToolComponent
                     $isRetry = true;
                     $job = $existingJob;
                     $job->update([
-                        'status'                => JobStatus::PROCESSING,
-                        'error_message'         => null,
+                        'status' => JobStatus::PROCESSING,
+                        'error_message' => null,
                         'processing_started_at' => now(),
                     ]);
                     ProcessedFile::where('file_job_id', $job->id)->delete();
@@ -947,34 +996,34 @@ class EditPdfComponent extends BaseToolComponent
                 }
             }
 
-            if (!$isRetry) {
+            if (! $isRetry) {
                 $newJobId = Str::uuid()->toString();
                 $this->fileJobId = $newJobId;
                 $jobDir = $storage->getJobDirectory($newJobId);
                 $job = FileJob::create([
-                    'id'                    => $newJobId,
-                    'tool_type'             => ToolType::EDIT_PDF,
-                    'status'                => JobStatus::PROCESSING,
-                    'download_token'        => Str::random(48),
-                    'input_metadata'        => [
-                        'file'            => basename($this->storedSourcePath),
-                        'clean_name'      => pathinfo($this->filename, PATHINFO_FILENAME),
-                        'ip'              => request()->ip(),
-                        'edits_count'     => count($this->editManifest),
-                        'add_text_count'  => count($this->addedTexts),
-                        'shapes_count'    => count($this->addedShapes),
-                        'engine'          => 'pdfium',
+                    'id' => $newJobId,
+                    'tool_type' => ToolType::EDIT_PDF,
+                    'status' => JobStatus::PROCESSING,
+                    'download_token' => Str::random(48),
+                    'input_metadata' => [
+                        'file' => basename($this->storedSourcePath),
+                        'clean_name' => pathinfo($this->filename, PATHINFO_FILENAME),
+                        'ip' => request()->ip(),
+                        'edits_count' => count($this->editManifest),
+                        'add_text_count' => count($this->addedTexts),
+                        'shapes_count' => count($this->addedShapes),
+                        'engine' => 'pdfium',
                     ],
-                    'expires_at'            => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
+                    'expires_at' => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
                     'processing_started_at' => now(),
                 ]);
             }
 
-            $finalOutputPath = $jobDir . DIRECTORY_SEPARATOR . $outputFilename;
+            $finalOutputPath = $jobDir.DIRECTORY_SEPARATOR.$outputFilename;
             $currentInputPath = $this->storedSourcePath;
 
             // Stage 1: True In-Place PDFium Text Object/Group Replacement
-            if (!empty($this->editManifest)) {
+            if (! empty($this->editManifest)) {
                 $uniqueEdits = $uniqueManifest;
                 foreach ($this->editManifest as $item) {
                     $key = $item['group_id'] ?? ($item['object_id'] ?? $item['id']);
@@ -983,13 +1032,13 @@ class EditPdfComponent extends BaseToolComponent
 
                 $replacements = array_values(array_map(function ($item) {
                     return [
-                        'page_index'       => (int) $item['page_index'],
-                        'group_id'         => (string) ($item['group_id'] ?? ''),
+                        'page_index' => (int) $item['page_index'],
+                        'group_id' => (string) ($item['group_id'] ?? ''),
                         'child_object_ids' => $item['child_object_ids'] ?? [],
-                        'object_id'        => (string) ($item['object_id'] ?? $item['id'] ?? ''),
-                        'target_text'      => (string) ($item['target_text'] ?? ''),
+                        'object_id' => (string) ($item['object_id'] ?? $item['id'] ?? ''),
+                        'target_text' => (string) ($item['target_text'] ?? ''),
                         'replacement_text' => (string) ($item['replacement_text'] ?? ''),
-                        'fit_strategy'     => !empty($item['auto_fit']) ? 'auto_fit' : 'preserve_origin',
+                        'fit_strategy' => ! empty($item['auto_fit']) ? 'auto_fit' : 'preserve_origin',
                     ];
                 }, $uniqueEdits));
 
@@ -1001,7 +1050,7 @@ class EditPdfComponent extends BaseToolComponent
             }
 
             // Stage 2: Additive Text & Shapes (if any)
-            if (!empty($this->addedTexts) || !empty($this->addedShapes)) {
+            if (! empty($this->addedTexts) || ! empty($this->addedShapes)) {
                 $annotationApplier->apply(
                     $currentInputPath,
                     $finalOutputPath,
@@ -1033,22 +1082,23 @@ class EditPdfComponent extends BaseToolComponent
 
             // Complete FileJob
             $job->update([
-                'status'                => JobStatus::COMPLETED,
-                'input_metadata'        => array_merge($job->input_metadata ?? [], [
+                'status' => JobStatus::COMPLETED,
+                'input_metadata' => array_merge($job->input_metadata ?? [], [
                     'output_filename' => $outputFilename,
-                    'engine_label'    => $engineLabel,
+                    'engine_label' => $engineLabel,
                 ]),
-                'duration_ms'           => $elapsedMs,
-                'completed_at'          => now(),
+                'duration_ms' => $elapsedMs,
+                'completed_at' => now(),
             ]);
+            $quota->settle($job);
 
             ProcessedFile::create([
-                'id'                   => Str::uuid()->toString(),
-                'file_job_id'          => $job->id,
-                'original_name'        => $this->filename,
-                'stored_filename'      => $outputFilename,
-                'mime_type'            => 'application/pdf',
-                'original_size_bytes'  => $this->fileSizeBytes,
+                'id' => Str::uuid()->toString(),
+                'file_job_id' => $job->id,
+                'original_name' => $this->filename,
+                'stored_filename' => $outputFilename,
+                'mime_type' => 'application/pdf',
+                'original_size_bytes' => $this->fileSizeBytes,
                 'processed_size_bytes' => $processedSizeBytes,
             ]);
 
@@ -1066,10 +1116,11 @@ class EditPdfComponent extends BaseToolComponent
             $this->fileJobId = $job->id;
             $this->jobStatus = 'completed';
         } catch (Throwable $e) {
-            Log::error("EditPdfComponent: processing failed: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            Log::error('EditPdfComponent: processing failed: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
             if (isset($job) && $job->exists) {
+                $quota->release($job);
                 $job->update([
-                    'status'        => JobStatus::FAILED,
+                    'status' => JobStatus::FAILED,
                     'error_message' => $e->getMessage(),
                 ]);
             }
@@ -1084,7 +1135,7 @@ class EditPdfComponent extends BaseToolComponent
     {
         try {
             $lock->release();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Lock release failure is non-fatal
         }
     }
@@ -1102,12 +1153,13 @@ class EditPdfComponent extends BaseToolComponent
     public function formatFileSize(int $bytes): string
     {
         if ($bytes < 1024) {
-            return $bytes . ' B';
+            return $bytes.' B';
         }
         if ($bytes < 1048576) {
-            return round($bytes / 1024, 1) . ' KB';
+            return round($bytes / 1024, 1).' KB';
         }
-        return round($bytes / 1048576, 2) . ' MB';
+
+        return round($bytes / 1048576, 2).' MB';
     }
 
     public function resetTool(): void
@@ -1128,7 +1180,7 @@ class EditPdfComponent extends BaseToolComponent
             'pageDimensions', 'allPageDimensionsByPage', 'pagePreviews', 'pageThumbnails',
             'allTextObjectsByPage', 'allTextGroupsByPage',
             'selectedObjectId', 'selectedObject', 'selectedGroupId', 'selectedGroup',
-            'editText', 'editFontSize', 'editColor', 'autoFit', 'editManifest', 'addedTexts', 'addedShapes', 'completedJob'
+            'editText', 'editFontSize', 'editColor', 'autoFit', 'editManifest', 'addedTexts', 'addedShapes', 'completedJob',
         ]);
         $this->resetState();
     }
@@ -1141,9 +1193,9 @@ class EditPdfComponent extends BaseToolComponent
 
         return view('livewire.tools.edit-pdf-component', [
             'currentTextObjects' => $currentTextObjects,
-            'currentTextGroups'  => $currentTextGroups,
+            'currentTextGroups' => $currentTextGroups,
         ])->layout('layouts.app', [
-            'title'       => __('tools.edit_pdf.title') . ' — ' . config('app.name'),
+            'title' => __('tools.edit_pdf.title').' — '.config('app.name'),
             'description' => __('tools.edit_pdf.desc'),
         ]);
     }

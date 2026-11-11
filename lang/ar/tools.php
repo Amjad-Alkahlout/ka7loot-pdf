@@ -206,9 +206,11 @@ return array (
   'convert_image' => 
   array (
     'title' => 'تحويل صيغ الصور',
-    'desc' => 'حوّل بين صيغ JPG وPNG وWebP فوراً بجودة فائقة وخيارات متقدمة.',
+    'desc' => 'حوّل صور JPG وPNG وWebP وGIF وBMP وHEIC وHEIF فوراً بجودة عالية.',
     'action' => 'تحويل الصيغة',
     'target_format' => 'الصيغة المستهدفة',
+    'engine' => 'معالجة الصور عبر GD مع دعم HEIC',
+    'heic_note' => 'يتم فك ترميز صور HEIC وHEIF بشكل آمن قبل التحويل. يُنصح باستخدام JPG للحصول على أفضل نتيجة.',
   ),
   'protect_pdf' => 
   array (

@@ -8,6 +8,7 @@ use App\Enums\ToolType;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
 use App\Models\ToolUsage;
+use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfSigningService;
 use App\Services\Pdf\PdfSplitService;
@@ -34,13 +35,18 @@ class SignPdfComponent extends BaseToolComponent
     public $signatureUpload;
 
     public string $filename = '';
+
     public int $fileSizeBytes = 0;
+
     public string $fileSizeFormatted = '';
+
     public int $pageCount = 0;
+
     public int $currentPage = 1;
 
     /**
      * Map of page number to preview base64 data URI (150 DPI crisp quality).
+     *
      * @var array<int, string>
      */
     public array $pagePreviews = [];
@@ -51,11 +57,14 @@ class SignPdfComponent extends BaseToolComponent
     public string $activeSignatureType = 'draw';
 
     public string $typedName = '';
+
     public string $typedStyle = 'classic';
+
     public ?string $activeSignaturePreview = null;
 
     /**
      * Placements on document pages.
+     *
      * @var array<int, array{
      *     id: string,
      *     page: int,
@@ -91,7 +100,7 @@ class SignPdfComponent extends BaseToolComponent
                 $pdfSplit = app(PdfSplitService::class);
                 $this->pageCount = max(1, $pdfSplit->getPageCount($realPath));
             } catch (Throwable $e) {
-                Log::warning("SignPdfComponent: Failed to get page count: " . $e->getMessage());
+                Log::warning('SignPdfComponent: Failed to get page count: '.$e->getMessage());
                 $this->pageCount = 1;
             }
 
@@ -113,7 +122,7 @@ class SignPdfComponent extends BaseToolComponent
         $this->loadPagePreview($page);
 
         // Preload next page in background for seamless navigation
-        if ($page < $this->pageCount && !isset($this->pagePreviews[$page + 1])) {
+        if ($page < $this->pageCount && ! isset($this->pagePreviews[$page + 1])) {
             $this->loadPagePreview($page + 1);
         }
     }
@@ -124,7 +133,7 @@ class SignPdfComponent extends BaseToolComponent
             return;
         }
 
-        if (!$this->upload) {
+        if (! $this->upload) {
             return;
         }
 
@@ -136,7 +145,7 @@ class SignPdfComponent extends BaseToolComponent
                 $this->pagePreviews[$page] = $preview;
             }
         } catch (Throwable $e) {
-            Log::warning("SignPdfComponent: Could not generate preview for page {$page}: " . $e->getMessage());
+            Log::warning("SignPdfComponent: Could not generate preview for page {$page}: ".$e->getMessage());
         }
     }
 
@@ -166,14 +175,14 @@ class SignPdfComponent extends BaseToolComponent
     {
         $this->activeSignaturePreview = $base64Data;
         $this->addPlacement([
-            'page'           => $this->currentPage,
+            'page' => $this->currentPage,
             'signature_data' => $base64Data,
             'signature_type' => 'draw',
-            'x_ratio'        => 0.35,
-            'y_ratio'        => 0.70,
-            'width_ratio'    => 0.30,
-            'height_ratio'   => 0.12,
-            'rotation'       => 0,
+            'x_ratio' => 0.35,
+            'y_ratio' => 0.70,
+            'width_ratio' => 0.30,
+            'height_ratio' => 0.12,
+            'rotation' => 0,
         ]);
     }
 
@@ -186,24 +195,24 @@ class SignPdfComponent extends BaseToolComponent
         if ($this->signatureUpload) {
             try {
                 $signingService = app(PdfSigningService::class);
-                $tempDest = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'sig_up_' . uniqid('', true) . '.png';
+                $tempDest = sys_get_temp_dir().DIRECTORY_SEPARATOR.'sig_up_'.uniqid('', true).'.png';
                 $signingService->normalizeSignatureImage($this->signatureUpload->getRealPath(), $tempDest);
 
                 $content = file_get_contents($tempDest);
                 @unlink($tempDest);
 
                 if ($content !== false) {
-                    $base64 = 'data:image/png;base64,' . base64_encode($content);
+                    $base64 = 'data:image/png;base64,'.base64_encode($content);
                     $this->activeSignaturePreview = $base64;
                     $this->addPlacement([
-                        'page'           => $this->currentPage,
+                        'page' => $this->currentPage,
                         'signature_data' => $base64,
                         'signature_type' => 'upload',
-                        'x_ratio'        => 0.35,
-                        'y_ratio'        => 0.70,
-                        'width_ratio'    => 0.30,
-                        'height_ratio'   => 0.12,
-                        'rotation'       => 0,
+                        'x_ratio' => 0.35,
+                        'y_ratio' => 0.70,
+                        'width_ratio' => 0.30,
+                        'height_ratio' => 0.12,
+                        'rotation' => 0,
                     ]);
                 }
             } catch (Throwable $e) {
@@ -217,6 +226,7 @@ class SignPdfComponent extends BaseToolComponent
         $clean = trim($this->typedName);
         if ($clean === '') {
             $this->activeSignaturePreview = null;
+
             return;
         }
 
@@ -228,7 +238,7 @@ class SignPdfComponent extends BaseToolComponent
                 36
             );
         } catch (Throwable $e) {
-            Log::warning("SignPdfComponent: typed signature generation failed: " . $e->getMessage());
+            Log::warning('SignPdfComponent: typed signature generation failed: '.$e->getMessage());
         }
     }
 
@@ -237,37 +247,35 @@ class SignPdfComponent extends BaseToolComponent
         $this->updatedTypedName();
         if ($this->activeSignaturePreview) {
             $this->addPlacement([
-                'page'            => $this->currentPage,
-                'signature_data'  => $this->activeSignaturePreview,
-                'signature_type'  => 'type',
+                'page' => $this->currentPage,
+                'signature_data' => $this->activeSignaturePreview,
+                'signature_type' => 'type',
                 'signature_style' => $this->typedStyle,
-                'x_ratio'         => 0.35,
-                'y_ratio'         => 0.70,
-                'width_ratio'     => 0.30,
-                'height_ratio'    => 0.12,
-                'rotation'        => 0,
+                'x_ratio' => 0.35,
+                'y_ratio' => 0.70,
+                'width_ratio' => 0.30,
+                'height_ratio' => 0.12,
+                'rotation' => 0,
             ]);
         }
     }
 
     /**
      * Add a signature placement to the document.
-     *
-     * @param array $params
      */
     public function addPlacement(array $params): void
     {
         $id = Str::uuid()->toString();
         $this->placements[] = [
-            'id'              => $id,
-            'page'            => (int) ($params['page'] ?? $this->currentPage),
-            'x_ratio'         => (float) ($params['x_ratio'] ?? 0.35),
-            'y_ratio'         => (float) ($params['y_ratio'] ?? 0.70),
-            'width_ratio'     => (float) ($params['width_ratio'] ?? 0.30),
-            'height_ratio'    => (float) ($params['height_ratio'] ?? 0.12),
-            'rotation'        => (int) ($params['rotation'] ?? 0),
-            'signature_data'  => (string) ($params['signature_data'] ?? $this->activeSignaturePreview ?? ''),
-            'signature_type'  => (string) ($params['signature_type'] ?? $this->activeSignatureType),
+            'id' => $id,
+            'page' => (int) ($params['page'] ?? $this->currentPage),
+            'x_ratio' => (float) ($params['x_ratio'] ?? 0.35),
+            'y_ratio' => (float) ($params['y_ratio'] ?? 0.70),
+            'width_ratio' => (float) ($params['width_ratio'] ?? 0.30),
+            'height_ratio' => (float) ($params['height_ratio'] ?? 0.12),
+            'rotation' => (int) ($params['rotation'] ?? 0),
+            'signature_data' => (string) ($params['signature_data'] ?? $this->activeSignaturePreview ?? ''),
+            'signature_type' => (string) ($params['signature_type'] ?? $this->activeSignatureType),
             'signature_style' => (string) ($params['signature_style'] ?? $this->typedStyle),
         ];
 
@@ -308,9 +316,9 @@ class SignPdfComponent extends BaseToolComponent
 
     public function removePlacement(string $id): void
     {
-        $this->placements = array_values(array_filter($this->placements, fn($p) => $p['id'] !== $id));
+        $this->placements = array_values(array_filter($this->placements, fn ($p) => $p['id'] !== $id));
         if ($this->selectedPlacementId === $id) {
-            $this->selectedPlacementId = !empty($this->placements) ? $this->placements[0]['id'] : null;
+            $this->selectedPlacementId = ! empty($this->placements) ? $this->placements[0]['id'] : null;
         }
     }
 
@@ -323,7 +331,8 @@ class SignPdfComponent extends BaseToolComponent
     public function process(
         SanitizeUploadedFileAction $sanitizer,
         FileStorageManager $storage,
-        PdfSigningService $signingService
+        PdfSigningService $signingService,
+        DailyFileQuotaService $quota
     ): void {
         $maxPdfKb = config('fileprocessor.limits.max_pdf_size_kb', 51200);
 
@@ -334,6 +343,15 @@ class SignPdfComponent extends BaseToolComponent
         if (empty($this->placements)) {
             $this->addError('placements', __('tools.sign_pdf.error_at_least_one_signature'));
             $this->errorMessage = __('tools.sign_pdf.error_at_least_one_signature');
+
+            return;
+        }
+        try {
+            $quota->assertAvailable();
+        } catch (Throwable $e) {
+            $this->addError('upload', $e->getMessage());
+            $this->jobStatus = 'uploaded';
+
             return;
         }
 
@@ -351,8 +369,8 @@ class SignPdfComponent extends BaseToolComponent
             $storageResult = $storage->storeUploadedFile($this->upload, $jobId, $sanitized['safe_filename']);
             $sourcePath = $storageResult['absolute_path'];
 
-            $outputFilename = 'signed_' . $sanitized['safe_filename'];
-            $outputPath = $jobDir . DIRECTORY_SEPARATOR . $outputFilename;
+            $outputFilename = 'signed_'.$sanitized['safe_filename'];
+            $outputPath = $jobDir.DIRECTORY_SEPARATOR.$outputFilename;
 
             // Execute signing
             $signingService->sign($sourcePath, $outputPath, $this->placements);
@@ -361,30 +379,30 @@ class SignPdfComponent extends BaseToolComponent
             $processedSizeBytes = filesize($outputPath);
 
             $job = FileJob::create([
-                'id'                    => $jobId,
-                'tool_type'             => ToolType::SIGN_PDF,
-                'status'                => JobStatus::COMPLETED,
-                'download_token'        => Str::random(48),
-                'input_metadata'        => [
-                    'file'            => $sanitized['safe_filename'],
+                'id' => $jobId,
+                'tool_type' => ToolType::SIGN_PDF,
+                'status' => JobStatus::COMPLETED,
+                'download_token' => Str::random(48),
+                'input_metadata' => [
+                    'file' => $sanitized['safe_filename'],
                     'output_filename' => $outputFilename,
-                    'clean_name'      => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
-                    'ip'              => request()->ip(),
+                    'clean_name' => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
+                    'ip' => request()->ip(),
                 ],
-                'expires_at'            => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
+                'expires_at' => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
                 'processing_started_at' => now(),
-                'completed_at'          => now(),
+                'completed_at' => now(),
             ]);
 
             ProcessedFile::create([
-                'id'                   => Str::uuid()->toString(),
-                'file_job_id'          => $job->id,
-                'original_name'        => 'signed_' . $sanitized['original_name'],
-                'stored_filename'      => $outputFilename,
-                'mime_type'            => 'application/pdf',
-                'original_size_bytes'  => $sanitized['size_bytes'],
+                'id' => Str::uuid()->toString(),
+                'file_job_id' => $job->id,
+                'original_name' => 'signed_'.$sanitized['original_name'],
+                'stored_filename' => $outputFilename,
+                'mime_type' => 'application/pdf',
+                'original_size_bytes' => $sanitized['size_bytes'],
                 'processed_size_bytes' => $processedSizeBytes,
-                'download_token'       => Str::random(48),
+                'download_token' => Str::random(48),
             ]);
 
             ToolUsage::log(
@@ -399,7 +417,7 @@ class SignPdfComponent extends BaseToolComponent
             $this->fileJobId = $job->id;
             $this->jobStatus = 'completed';
         } catch (Throwable $e) {
-            Log::error("SignPdfComponent: processing failed: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            Log::error('SignPdfComponent: processing failed: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
             $this->errorMessage = $e->getMessage();
             $this->jobStatus = 'failed';
         }
@@ -421,7 +439,7 @@ class SignPdfComponent extends BaseToolComponent
             'typedName',
             'activeSignaturePreview',
             'errorMessage',
-            'statusMessage'
+            'statusMessage',
         ]);
         $this->resetState();
     }
@@ -429,16 +447,17 @@ class SignPdfComponent extends BaseToolComponent
     protected function formatFileSize(int $bytes): string
     {
         if ($bytes >= 1048576) {
-            return round($bytes / 1048576, 2) . ' MB';
+            return round($bytes / 1048576, 2).' MB';
         }
-        return round($bytes / 1024, 1) . ' KB';
+
+        return round($bytes / 1024, 1).' KB';
     }
 
     public function render()
     {
         return view('livewire.tools.sign-pdf-component')
             ->layout('layouts.app', [
-                'title'       => __('tools.sign_pdf.title'),
+                'title' => __('tools.sign_pdf.title'),
                 'description' => __('tools.sign_pdf.desc'),
             ]);
     }

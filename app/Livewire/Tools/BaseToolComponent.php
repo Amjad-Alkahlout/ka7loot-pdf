@@ -5,6 +5,7 @@ namespace App\Livewire\Tools;
 use App\Enums\JobStatus;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
+use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
 use App\Services\Share\TemporaryShareService;
 use Livewire\Component;
@@ -15,22 +16,40 @@ abstract class BaseToolComponent extends Component
     use WithFileUploads;
 
     public ?string $fileJobId = null;
+
     public string $jobStatus = 'empty'; // 'empty', 'ready', 'uploaded', 'processing', 'completed', 'failed'
+
     public ?string $errorMessage = null;
+
     public ?string $statusMessage = null;
 
     // Temporary QR Share Properties
     public bool $showShareSection = false;
+
     public int $shareExpirationMinutes = 15;
+
     public ?int $shareMaxDownloads = null;
+
     public ?string $selectedFileIdForShare = null;
+
     public ?string $activeShareId = null;
+
     public ?string $activeShareToken = null;
+
     public ?string $activeShareUrl = null;
+
     public ?string $activeShareQrSvg = null;
+
     public ?string $activeShareExpiresAt = null;
+
     public ?int $activeShareRemainingDownloads = null;
+
     public ?string $shareMessage = null;
+
+    public function getDailyQuotaProperty(DailyFileQuotaService $quota): array
+    {
+        return $quota->summary();
+    }
 
     /**
      * Localized validation error messages for uploads.
@@ -38,14 +57,14 @@ abstract class BaseToolComponent extends Component
     public function messages(): array
     {
         return [
-            'upload.required'    => __('validation.required', ['attribute' => __('ui.file')]),
-            'upload.file'        => __('validation.file', ['attribute' => __('ui.file')]),
-            'upload.max'         => __('validation.max.file', ['attribute' => __('ui.file')]),
-            'upload.uploaded'    => __('validation.uploaded', ['attribute' => __('ui.file')]),
-            'uploads.required'   => __('validation.required', ['attribute' => __('ui.files')]),
+            'upload.required' => __('validation.required', ['attribute' => __('ui.file')]),
+            'upload.file' => __('validation.file', ['attribute' => __('ui.file')]),
+            'upload.max' => __('validation.max.file', ['attribute' => __('ui.file')]),
+            'upload.uploaded' => __('validation.uploaded', ['attribute' => __('ui.file')]),
+            'uploads.required' => __('validation.required', ['attribute' => __('ui.files')]),
             'uploads.*.required' => __('validation.required', ['attribute' => __('ui.file')]),
-            'uploads.*.file'     => __('validation.file', ['attribute' => __('ui.file')]),
-            'uploads.*.max'      => __('validation.max.file', ['attribute' => __('ui.file')]),
+            'uploads.*.file' => __('validation.file', ['attribute' => __('ui.file')]),
+            'uploads.*.max' => __('validation.max.file', ['attribute' => __('ui.file')]),
             'uploads.*.uploaded' => __('validation.uploaded', ['attribute' => __('ui.file')]),
         ];
     }
@@ -87,15 +106,16 @@ abstract class BaseToolComponent extends Component
      */
     public function pollJobStatus(): void
     {
-        if (!$this->fileJobId) {
+        if (! $this->fileJobId) {
             return;
         }
 
         $job = FileJob::find($this->fileJobId);
 
-        if (!$job) {
+        if (! $job) {
             $this->jobStatus = 'failed';
             $this->errorMessage = 'File job was not found.';
+
             return;
         }
 
@@ -140,7 +160,7 @@ abstract class BaseToolComponent extends Component
      */
     public function deleteNow(FileStorageManager $storage): void
     {
-        if (!$this->fileJobId) {
+        if (! $this->fileJobId) {
             return;
         }
 
@@ -179,6 +199,7 @@ abstract class BaseToolComponent extends Component
     {
         if ($this->showShareSection && $this->selectedFileIdForShare === $fileId) {
             $this->showShareSection = false;
+
             return;
         }
 
@@ -193,7 +214,7 @@ abstract class BaseToolComponent extends Component
     public function generateShare(TemporaryShareService $shareService): void
     {
         $job = $this->fileJob;
-        if (!$job || $this->jobStatus !== 'completed') {
+        if (! $job || $this->jobStatus !== 'completed') {
             return;
         }
 
@@ -273,7 +294,7 @@ abstract class BaseToolComponent extends Component
      */
     public function getProcessedFilesProperty()
     {
-        if (!$this->fileJobId || $this->jobStatus !== 'completed') {
+        if (! $this->fileJobId || $this->jobStatus !== 'completed') {
             return collect();
         }
 
@@ -285,7 +306,7 @@ abstract class BaseToolComponent extends Component
      */
     public function getFileJobProperty(): ?FileJob
     {
-        if (!$this->fileJobId) {
+        if (! $this->fileJobId) {
             return null;
         }
 

@@ -27,7 +27,7 @@ class ConvertImageComponent extends BaseToolComponent
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
             $ext = strtolower($this->upload->getClientOriginalExtension());
-            $this->targetFormat = ($ext === 'png') ? 'jpg' : 'png';
+            $this->targetFormat = in_array($ext, ['heic', 'heif', 'png'], true) ? 'jpg' : 'png';
         }
     }
 
@@ -50,7 +50,15 @@ class ConvertImageComponent extends BaseToolComponent
             $jobId = Str::uuid()->toString();
             $storage->getJobDirectory($jobId);
 
-            $sanitized = $sanitizer->execute($this->upload, ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp']);
+            $sanitized = $sanitizer->execute($this->upload, [
+                'image/jpeg',
+                'image/png',
+                'image/webp',
+                'image/gif',
+                'image/bmp',
+                'image/heic',
+                'image/heif',
+            ]);
             $this->upload->storeAs(config('fileprocessor.storage.temp_path', 'secure_temp') . "/{$jobId}", $sanitized['safe_filename'], config('fileprocessor.storage.disk', 'local'));
 
             $job = FileJob::create([
@@ -61,6 +69,7 @@ class ConvertImageComponent extends BaseToolComponent
                 'input_metadata' => [
                     'file'          => $sanitized['safe_filename'],
                     'clean_name'    => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
+                    'source_mime'   => $sanitized['mime_type'],
                     'target_format' => $this->targetFormat,
                     'ip'            => request()->ip(),
                 ],

@@ -63,6 +63,18 @@
                             <li>يمكن لمنشئ الرابط إبطال المشاركة وحظر التحميل فوراً من واجهة الموقع.</li>
                         </ul>
                     </section>
+
+                    <section class="space-y-3">
+                        <h2 class="text-xl font-bold text-slate-900">6. تسجيل الدخول والحصص اليومية</h2>
+                        <p>
+                            يمكنك استخدام الأدوات دون حساب بحد يومي قدره 20 ملفاً. تسجيل الدخول عبر Google يرفع الحد إلى 50 ملفاً، ويتم الاحتفاظ باستخدامك الحالي لذلك اليوم عند تسجيل الدخول.
+                        </p>
+                        <ul class="list-disc list-inside space-y-1 text-slate-600">
+                            <li>نخزن معرّف Google الثابت واسمك وبريدك الإلكتروني وصورة الحساب اختيارياً لإنشاء حسابك وتسجيل دخولك.</li>
+                            <li>لا نطلب صلاحية Google Drive ولا نخزن رموز الوصول أو التحديث.</li>
+                            <li>نخزن عدادات الاستخدام اليومية ومعرّف جلسة عشوائياً للضيوف، دون أسماء الملفات أو محتوياتها.</li>
+                        </ul>
+                    </section>
                 @else
                     <section class="space-y-3">
                         <h2 class="text-xl font-bold text-slate-900">1. Our Privacy Commitment</h2>
@@ -113,6 +125,18 @@
                             <li>Access is gated by a cryptographically secure 64-character token stored as an irreversible SHA-256 hash.</li>
                             <li>Tokens automatically expire after their designated TTL (1 to 24 hours) or upon reaching their download ceiling (max 5 downloads).</li>
                             <li>The owner retains the ability to instantly revoke access at any point prior to expiration.</li>
+                        </ul>
+                    </section>
+
+                    <section class="space-y-3">
+                        <h2 class="text-xl font-bold text-slate-900">6. Google Sign-In & Daily File Limits</h2>
+                        <p>
+                            You may use the tools without an account with a daily limit of 20 files. Signing in with Google raises the limit to 50 files, and your current-day guest usage is preserved when you sign in.
+                        </p>
+                        <ul class="list-disc list-inside space-y-1 text-slate-600">
+                            <li>We store Google’s stable account ID, your name, email address, and optional avatar to create and authenticate your account.</li>
+                            <li>We request no Google Drive permission and do not store Google access or refresh tokens.</li>
+                            <li>We store daily usage counters and a random guest-session identifier, not filenames or file contents.</li>
                         </ul>
                     </section>
                 @endif

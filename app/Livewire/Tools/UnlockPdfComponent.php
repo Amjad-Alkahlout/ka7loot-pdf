@@ -8,6 +8,7 @@ use App\Enums\ToolType;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
 use App\Models\ToolUsage;
+use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfPasswordRemovalService;
 use Illuminate\Support\Str;
@@ -37,14 +38,23 @@ class UnlockPdfComponent extends BaseToolComponent
     public function process(
         SanitizeUploadedFileAction $sanitizer,
         FileStorageManager $storage,
-        PdfPasswordRemovalService $removalService
+        PdfPasswordRemovalService $removalService,
+        DailyFileQuotaService $quota
     ): void {
         $maxPdfKb = config('fileprocessor.limits.max_pdf_size_kb', 51200);
 
         $this->validate([
-            'upload'   => "required|file|max:{$maxPdfKb}",
+            'upload' => "required|file|max:{$maxPdfKb}",
             'password' => 'required|string',
         ]);
+        try {
+            $quota->assertAvailable();
+        } catch (Throwable $e) {
+            $this->addError('upload', $e->getMessage());
+            $this->jobStatus = 'uploaded';
+
+            return;
+        }
 
         $this->jobStatus = 'processing';
         $this->statusMessage = __('ui.status_processing');
@@ -60,22 +70,24 @@ class UnlockPdfComponent extends BaseToolComponent
             $sourcePath = $storageResult['absolute_path'];
 
             // 1. Check if the PDF is actually protected
-            if (!$removalService->isEncrypted($sourcePath)) {
+            if (! $removalService->isEncrypted($sourcePath)) {
                 $this->jobStatus = 'uploaded';
                 $this->addError('upload', __('tools.unlock_pdf.error_not_encrypted'));
+
                 return;
             }
 
             // 2. Strictly verify password
-            if (!$removalService->verifyPassword($sourcePath, $this->password)) {
+            if (! $removalService->verifyPassword($sourcePath, $this->password)) {
                 $this->reset(['password']);
                 $this->jobStatus = 'uploaded';
                 $this->addError('password', __('tools.unlock_pdf.error_invalid_password'));
+
                 return;
             }
 
-            $outputFilename = 'unlocked_' . $sanitized['safe_filename'];
-            $outputPath = $jobDir . DIRECTORY_SEPARATOR . $outputFilename;
+            $outputFilename = 'unlocked_'.$sanitized['safe_filename'];
+            $outputPath = $jobDir.DIRECTORY_SEPARATOR.$outputFilename;
 
             $removalResult = $removalService->removePassword(
                 sourcePath: $sourcePath,
@@ -91,31 +103,31 @@ class UnlockPdfComponent extends BaseToolComponent
 
             // Create completed FileJob (NEVER storing the password)
             $job = FileJob::create([
-                'id'                    => $jobId,
-                'tool_type'             => ToolType::UNLOCK_PDF,
-                'status'                => JobStatus::COMPLETED,
-                'download_token'        => Str::random(48),
-                'input_metadata'        => [
-                    'file'            => $sanitized['safe_filename'],
+                'id' => $jobId,
+                'tool_type' => ToolType::UNLOCK_PDF,
+                'status' => JobStatus::COMPLETED,
+                'download_token' => Str::random(48),
+                'input_metadata' => [
+                    'file' => $sanitized['safe_filename'],
                     'output_filename' => $outputFilename,
-                    'clean_name'      => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
-                    'engine'          => $removalResult['engine'],
-                    'ip'              => request()->ip(),
+                    'clean_name' => pathinfo($sanitized['original_name'], PATHINFO_FILENAME),
+                    'engine' => $removalResult['engine'],
+                    'ip' => request()->ip(),
                 ],
-                'expires_at'            => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
+                'expires_at' => now()->addMinutes(config('fileprocessor.retention.job_retention_minutes', 60)),
                 'processing_started_at' => now(),
-                'completed_at'          => now(),
+                'completed_at' => now(),
             ]);
 
             ProcessedFile::create([
-                'id'                   => Str::uuid()->toString(),
-                'file_job_id'          => $job->id,
-                'original_name'        => 'unlocked_' . $sanitized['original_name'],
-                'stored_filename'      => $outputFilename,
-                'mime_type'            => 'application/pdf',
-                'original_size_bytes'  => $sanitized['size_bytes'],
+                'id' => Str::uuid()->toString(),
+                'file_job_id' => $job->id,
+                'original_name' => 'unlocked_'.$sanitized['original_name'],
+                'stored_filename' => $outputFilename,
+                'mime_type' => 'application/pdf',
+                'original_size_bytes' => $sanitized['size_bytes'],
                 'processed_size_bytes' => $processedSizeBytes,
-                'download_token'       => Str::random(48),
+                'download_token' => Str::random(48),
             ]);
 
             ToolUsage::log(
@@ -140,7 +152,7 @@ class UnlockPdfComponent extends BaseToolComponent
     {
         return view('livewire.tools.unlock-pdf-component')
             ->layout('layouts.app', [
-                'title'       => __('tools.unlock_pdf.title'),
+                'title' => __('tools.unlock_pdf.title'),
                 'description' => __('tools.unlock_pdf.desc'),
             ]);
     }

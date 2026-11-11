@@ -4,11 +4,13 @@ namespace App\Models;
 
 use App\Enums\JobStatus;
 use App\Enums\ToolType;
+use App\Services\File\DailyFileQuotaService;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 class FileJob extends Model
@@ -37,12 +39,28 @@ class FileJob extends Model
     protected static function booted(): void
     {
         static::creating(function (FileJob $job) {
+            if (empty($job->user_id) && auth()->check()) {
+                $job->user_id = auth()->id();
+            }
             if (empty($job->download_token)) {
                 $job->download_token = Str::random(48);
             }
             if (empty($job->expires_at)) {
                 $retentionMinutes = config('fileprocessor.retention.file_retention_minutes', 60);
                 $job->expires_at = now()->addMinutes($retentionMinutes);
+            }
+        });
+
+        static::created(function (FileJob $job) {
+            try {
+                app(DailyFileQuotaService::class)->reserveForJob($job);
+            } catch (\Throwable $e) {
+                $job->deleteQuietly();
+                throw $e;
+            }
+
+            if ($job->status === JobStatus::COMPLETED) {
+                app(DailyFileQuotaService::class)->settle($job);
             }
         });
     }
@@ -55,6 +73,11 @@ class FileJob extends Model
     public function processedFiles(): HasMany
     {
         return $this->hasMany(ProcessedFile::class);
+    }
+
+    public function quotaReservation(): HasOne
+    {
+        return $this->hasOne(FileQuotaReservation::class);
     }
 
     public function isExpired(): bool

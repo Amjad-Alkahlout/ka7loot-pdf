@@ -203,12 +203,14 @@ return array (
     'percentage' => 'Percentage (%)',
     'maintain_ratio' => 'Maintain Aspect Ratio',
   ),
-  'convert_image' => 
+  'convert_image' =>
   array (
     'title' => 'Convert Image',
-    'desc' => 'Convert images between JPG, PNG, and WebP formats instantly with high fidelity.',
+    'desc' => 'Convert JPG, PNG, WebP, GIF, BMP, HEIC, and HEIF images instantly with high fidelity.',
     'action' => 'Convert Format',
     'target_format' => 'Target Format',
+    'engine' => 'GD image processing with HEIC support',
+    'heic_note' => 'HEIC and HEIF images are decoded securely before conversion. JPG is recommended for the best result.',
   ),
   'protect_pdf' => 
   array (

@@ -54,9 +54,9 @@
                 @include('livewire.tools.upload-progress', [
                     'propertyName' => 'upload',
                     'multiple'     => false,
-                    'accept'       => 'image/jpeg,image/png,image/webp,image/gif,image/bmp',
+                    'accept'       => 'image/jpeg,image/png,image/webp,image/gif,image/bmp,image/heic,image/heif,.heic,.heif',
                     'maxSizeMb'    => $this->getMaxImageSizeMb(),
-                    'formatsHint'  => 'JPG, PNG, WebP, GIF, BMP',
+                    'formatsHint'  => 'JPG, PNG, WebP, GIF, BMP, HEIC, HEIF',
                 ])
             </div>
         @else
@@ -88,7 +88,7 @@
                         <span class="text-base">🖼️</span>
                         <div>
                             <span class="font-bold">{{ __('ui.engine_used') }}:</span>
-                            <span class="font-semibold">{{ __('ui.engine_image_gd') }}</span>
+                            <span class="font-semibold">{{ __('tools.convert_image.engine') }}</span>
                         </div>
                     </div>
                 </div>
@@ -96,6 +96,7 @@
                 <!-- Target Format Options -->
                 <div class="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-4">
                     <label class="block text-sm font-bold text-slate-900">{{ __('tools.convert_image.target_format') }}</label>
+                    <p class="text-xs text-slate-500">{{ __('tools.convert_image.heic_note') }}</p>
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         @foreach(['jpg' => 'JPG', 'png' => 'PNG', 'webp' => 'WebP', 'bmp' => 'BMP'] as $fmt => $fmtLabel)
                             <label class="flex items-center justify-center p-3 rounded-xl border-2 cursor-pointer text-sm font-bold transition {{ $targetFormat === $fmt ? 'border-indigo-600 bg-indigo-50/40 text-indigo-900' : 'border-slate-200 text-slate-700 hover:border-slate-300' }}">

@@ -12,7 +12,9 @@ use App\Models\FileJob;
 use App\Models\ProcessedFile;
 use App\Models\ToolUsage;
 use App\Services\File\ArchiveGeneratorService;
+use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
+use App\Services\Image\HeicConverterService;
 use App\Services\Image\ImageBackgroundService;
 use App\Services\Image\ImageCompressionService;
 use App\Services\Image\ImageConversionService;
@@ -27,8 +29,8 @@ use App\Services\Pdf\PdfSigningService;
 use App\Services\Pdf\PdfSplitService;
 use App\Services\Pdf\PdfTargetSizeCompressionService;
 use App\Services\Pdf\PdfToImageService;
-use App\Services\System\SystemBinaryDetector;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -43,6 +45,7 @@ class ProcessFileJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
+
     public int $timeout = 300;
 
     public function __construct(
@@ -60,15 +63,18 @@ class ProcessFileJob implements ShouldQueue
         ImageCompressionService $imageCompress,
         ImageResizeService $imageResize,
         ImageConversionService $imageConvert,
+        HeicConverterService $heicConvert,
         ArchiveGeneratorService $archiver,
         HeicToPdfService $heicToPdf,
+        DailyFileQuotaService $quota,
         ?PdfSigningService $pdfSign = null
     ): void {
         $lock = Cache::lock("process_file_job:{$this->fileJobId}", 120);
 
-        if (!$lock->get()) {
+        if (! $lock->get()) {
             // Another worker is currently processing this job
             Log::info("ProcessFileJob: Concurrency lock active for job {$this->fileJobId}. Skipping concurrent execution.");
+
             return;
         }
 
@@ -76,9 +82,10 @@ class ProcessFileJob implements ShouldQueue
 
         try {
             $job = FileJob::find($this->fileJobId);
-            if (!$job) {
+            if (! $job) {
                 Log::warning("ProcessFileJob: Job {$this->fileJobId} not found in database.");
                 $this->releaseLockSafely($lock);
+
                 return;
             }
 
@@ -86,11 +93,14 @@ class ProcessFileJob implements ShouldQueue
             if ($job->status === JobStatus::COMPLETED) {
                 Log::info("ProcessFileJob: Job {$this->fileJobId} is already marked as completed. Skipping.");
                 $this->releaseLockSafely($lock);
+
                 return;
             }
 
+            $quota->reserveForJob($job);
+
             $job->update([
-                'status'                => JobStatus::PROCESSING,
+                'status' => JobStatus::PROCESSING,
                 'processing_started_at' => now(),
             ]);
 
@@ -106,18 +116,18 @@ class ProcessFileJob implements ShouldQueue
 
             switch ($job->tool_type) {
                 case ToolType::MERGE_PDF:
-                    $files = array_map(fn($f) => $jobDir . DIRECTORY_SEPARATOR . $f, $meta['files'] ?? []);
+                    $files = array_map(fn ($f) => $jobDir.DIRECTORY_SEPARATOR.$f, $meta['files'] ?? []);
                     $totalInputBytes = array_sum(array_map('filesize', array_filter($files, 'file_exists')));
                     $outFilename = 'merged_output.pdf';
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                     $res = $pdfMerge->merge($files, $outPath);
 
                     $outputs[] = [
-                        'original_name'        => $meta['output_filename'] ?? 'merged.pdf',
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => 'application/pdf',
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => $meta['output_filename'] ?? 'merged.pdf',
+                        'stored_filename' => $outFilename,
+                        'mime_type' => 'application/pdf',
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
                     $resultMeta['engine'] = 'fpdi';
@@ -125,7 +135,7 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::SPLIT_PDF:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $mode = $meta['split_mode'] ?? ($meta['mode'] ?? 'range');
                     $cleanBase = $meta['clean_name'] ?? 'document';
@@ -133,7 +143,7 @@ class ProcessFileJob implements ShouldQueue
 
                     if ($mode === 'range') {
                         // Support pre-parsed groups or raw range string
-                        if (!empty($meta['ranges']) && is_array($meta['ranges'])) {
+                        if (! empty($meta['ranges']) && is_array($meta['ranges'])) {
                             $groups = $meta['ranges'];
                         } else {
                             $rangeStr = $meta['range'] ?? '1';
@@ -145,7 +155,7 @@ class ProcessFileJob implements ShouldQueue
                             $partNum = $idx + 1;
                             $label = $rangeSpec['range'] ?? ($rangeSpec['label'] ?? (string) $partNum);
                             $outFilename = "split_part_{$partNum}.pdf";
-                            $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                            $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                             $pages = $rangeSpec['pages'] ?? (isset($rangeSpec['start'], $rangeSpec['end']) ? range($rangeSpec['start'], $rangeSpec['end']) : [$partNum]);
                             $res = $pdfSplit->extractPages($source, $outPath, $pages);
@@ -155,44 +165,44 @@ class ProcessFileJob implements ShouldQueue
                                 : "{$cleanBase}_part_{$partNum}_pages_{$label}.pdf";
 
                             $createdFiles[] = [
-                                'path'                 => $outPath,
-                                'original_name'        => $displayName,
-                                'stored_filename'      => $outFilename,
-                                'mime_type'            => 'application/pdf',
-                                'original_size_bytes'  => $totalInputBytes,
+                                'path' => $outPath,
+                                'original_name' => $displayName,
+                                'stored_filename' => $outFilename,
+                                'mime_type' => 'application/pdf',
+                                'original_size_bytes' => $totalInputBytes,
                                 'processed_size_bytes' => $res['size_bytes'],
                             ];
                         }
 
                         if (count($createdFiles) > 1) {
                             $zipStored = 'output_split_bundle.zip';
-                            $zipPath = $jobDir . DIRECTORY_SEPARATOR . $zipStored;
-                            $zipFiles = array_map(fn($cf) => $cf['path'], $createdFiles);
+                            $zipPath = $jobDir.DIRECTORY_SEPARATOR.$zipStored;
+                            $zipFiles = array_map(fn ($cf) => $cf['path'], $createdFiles);
                             $zipRes = $archiver->createZip($zipFiles, $zipPath);
 
                             $outputs[] = [
-                                'original_name'        => "{$cleanBase}_split_bundle.zip",
-                                'stored_filename'      => $zipStored,
-                                'mime_type'            => 'application/zip',
-                                'original_size_bytes'  => $totalInputBytes,
+                                'original_name' => "{$cleanBase}_split_bundle.zip",
+                                'stored_filename' => $zipStored,
+                                'mime_type' => 'application/zip',
+                                'original_size_bytes' => $totalInputBytes,
                                 'processed_size_bytes' => $zipRes['size_bytes'],
                             ];
 
                             foreach ($createdFiles as $cf) {
                                 $outputs[] = [
-                                    'original_name'        => $cf['original_name'],
-                                    'stored_filename'      => $cf['stored_filename'],
-                                    'mime_type'            => $cf['mime_type'],
-                                    'original_size_bytes'  => $cf['original_size_bytes'],
+                                    'original_name' => $cf['original_name'],
+                                    'stored_filename' => $cf['stored_filename'],
+                                    'mime_type' => $cf['mime_type'],
+                                    'original_size_bytes' => $cf['original_size_bytes'],
                                     'processed_size_bytes' => $cf['processed_size_bytes'],
                                 ];
                             }
                         } elseif (count($createdFiles) === 1) {
                             $outputs[] = [
-                                'original_name'        => $createdFiles[0]['original_name'],
-                                'stored_filename'      => $createdFiles[0]['stored_filename'],
-                                'mime_type'            => $createdFiles[0]['mime_type'],
-                                'original_size_bytes'  => $totalInputBytes,
+                                'original_name' => $createdFiles[0]['original_name'],
+                                'stored_filename' => $createdFiles[0]['stored_filename'],
+                                'mime_type' => $createdFiles[0]['mime_type'],
+                                'original_size_bytes' => $totalInputBytes,
                                 'processed_size_bytes' => $createdFiles[0]['processed_size_bytes'],
                             ];
                         }
@@ -205,66 +215,66 @@ class ProcessFileJob implements ShouldQueue
                             $partNum = $idx + 1;
                             $rangeLabel = $group['range'] ?? (string) $partNum;
                             $outFilename = "split_interval_{$partNum}.pdf";
-                            $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                            $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                             $res = $pdfSplit->extractPages($source, $outPath, $group['pages']);
                             $createdFiles[] = [
-                                'path'                 => $outPath,
-                                'original_name'        => "{$cleanBase}_part_{$partNum}_pages_{$rangeLabel}.pdf",
-                                'stored_filename'      => $outFilename,
-                                'mime_type'            => 'application/pdf',
-                                'original_size_bytes'  => $totalInputBytes,
+                                'path' => $outPath,
+                                'original_name' => "{$cleanBase}_part_{$partNum}_pages_{$rangeLabel}.pdf",
+                                'stored_filename' => $outFilename,
+                                'mime_type' => 'application/pdf',
+                                'original_size_bytes' => $totalInputBytes,
                                 'processed_size_bytes' => $res['size_bytes'],
                             ];
                         }
 
                         if (count($createdFiles) > 1) {
                             $zipStored = 'output_split_every_n.zip';
-                            $zipPath = $jobDir . DIRECTORY_SEPARATOR . $zipStored;
-                            $zipFiles = array_map(fn($cf) => $cf['path'], $createdFiles);
+                            $zipPath = $jobDir.DIRECTORY_SEPARATOR.$zipStored;
+                            $zipFiles = array_map(fn ($cf) => $cf['path'], $createdFiles);
                             $zipRes = $archiver->createZip($zipFiles, $zipPath);
 
                             $outputs[] = [
-                                'original_name'        => "{$cleanBase}_split_every_{$interval}_pages.zip",
-                                'stored_filename'      => $zipStored,
-                                'mime_type'            => 'application/zip',
-                                'original_size_bytes'  => $totalInputBytes,
+                                'original_name' => "{$cleanBase}_split_every_{$interval}_pages.zip",
+                                'stored_filename' => $zipStored,
+                                'mime_type' => 'application/zip',
+                                'original_size_bytes' => $totalInputBytes,
                                 'processed_size_bytes' => $zipRes['size_bytes'],
                             ];
 
                             foreach ($createdFiles as $cf) {
                                 $outputs[] = [
-                                    'original_name'        => $cf['original_name'],
-                                    'stored_filename'      => $cf['stored_filename'],
-                                    'mime_type'            => $cf['mime_type'],
-                                    'original_size_bytes'  => $cf['original_size_bytes'],
+                                    'original_name' => $cf['original_name'],
+                                    'stored_filename' => $cf['stored_filename'],
+                                    'mime_type' => $cf['mime_type'],
+                                    'original_size_bytes' => $cf['original_size_bytes'],
                                     'processed_size_bytes' => $cf['processed_size_bytes'],
                                 ];
                             }
                         } elseif (count($createdFiles) === 1) {
                             $outputs[] = [
-                                'original_name'        => $createdFiles[0]['original_name'],
-                                'stored_filename'      => $createdFiles[0]['stored_filename'],
-                                'mime_type'            => $createdFiles[0]['mime_type'],
-                                'original_size_bytes'  => $totalInputBytes,
+                                'original_name' => $createdFiles[0]['original_name'],
+                                'stored_filename' => $createdFiles[0]['stored_filename'],
+                                'mime_type' => $createdFiles[0]['mime_type'],
+                                'original_size_bytes' => $totalInputBytes,
                                 'processed_size_bytes' => $createdFiles[0]['processed_size_bytes'],
                             ];
                         }
                     } else {
                         // Extract all individual pages as zip
-                        $splitDir = $jobDir . DIRECTORY_SEPARATOR . 'split_pages';
+                        $splitDir = $jobDir.DIRECTORY_SEPARATOR.'split_pages';
                         $pageFiles = $pdfSplit->splitAllPages($source, $splitDir);
 
-                        $zipFiles = array_map(fn($pf) => $pf['path'], $pageFiles);
+                        $zipFiles = array_map(fn ($pf) => $pf['path'], $pageFiles);
                         $zipStored = 'output_pages.zip';
-                        $zipPath = $jobDir . DIRECTORY_SEPARATOR . $zipStored;
+                        $zipPath = $jobDir.DIRECTORY_SEPARATOR.$zipStored;
                         $zipRes = $archiver->createZip($zipFiles, $zipPath);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_split_all.zip',
-                            'stored_filename'      => $zipStored,
-                            'mime_type'            => 'application/zip',
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'document').'_split_all.zip',
+                            'stored_filename' => $zipStored,
+                            'mime_type' => 'application/zip',
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => $zipRes['size_bytes'],
                         ];
                     }
@@ -273,37 +283,37 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::SIGN_PDF:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $outFilename = 'output_signed.pdf';
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
                     $placements = $meta['placements'] ?? [];
 
                     $signer = $pdfSign ?? app(PdfSigningService::class);
                     $res = $signer->sign($source, $outPath, $placements);
 
                     $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'document') . '_signed.pdf',
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => 'application/pdf',
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => ($meta['clean_name'] ?? 'document').'_signed.pdf',
+                        'stored_filename' => $outFilename,
+                        'mime_type' => 'application/pdf',
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
                     $resultMeta['engine'] = 'fpdi';
                     $resultMeta['engine_label'] = 'PDF document processing (FPDI)';
                     break;
                 case ToolType::ORGANIZE_PDF:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $operations = $meta['operations'] ?? [];
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_organized.pdf';
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.'output_organized.pdf';
 
                     $res = $pdfOrganize->organize($source, $outPath, $operations);
                     $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'document') . '_organized.pdf',
-                        'stored_filename'      => 'output_organized.pdf',
-                        'mime_type'            => 'application/pdf',
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => ($meta['clean_name'] ?? 'document').'_organized.pdf',
+                        'stored_filename' => 'output_organized.pdf',
+                        'mime_type' => 'application/pdf',
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
                     $resultMeta['engine'] = 'fpdi';
@@ -311,9 +321,9 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::JPG_TO_PDF:
-                    $sources = array_map(fn($f) => $jobDir . DIRECTORY_SEPARATOR . $f, $meta['files'] ?? []);
+                    $sources = array_map(fn ($f) => $jobDir.DIRECTORY_SEPARATOR.$f, $meta['files'] ?? []);
                     $totalInputBytes = array_sum(array_map('filesize', array_filter($sources, 'file_exists')));
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_images.pdf';
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.'output_images.pdf';
 
                     $pageSize = PageSize::tryFrom($meta['page_size'] ?? '') ?? PageSize::A4;
                     $orientation = PageOrientation::tryFrom($meta['orientation'] ?? '') ?? PageOrientation::AUTO;
@@ -321,10 +331,10 @@ class ProcessFileJob implements ShouldQueue
 
                     $res = $jpgToPdf->convertImagesToPdf($sources, $outPath, $pageSize, $orientation, $margin);
                     $outputs[] = [
-                        'original_name'        => $meta['output_filename'] ?? 'converted_images.pdf',
-                        'stored_filename'      => 'output_images.pdf',
-                        'mime_type'            => 'application/pdf',
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => $meta['output_filename'] ?? 'converted_images.pdf',
+                        'stored_filename' => 'output_images.pdf',
+                        'mime_type' => 'application/pdf',
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'],
                     ];
                     $resultMeta['engine'] = 'fpdi';
@@ -332,9 +342,9 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::HEIC_TO_PDF:
-                    $sources = array_map(fn($f) => $jobDir . DIRECTORY_SEPARATOR . $f, $meta['files'] ?? []);
+                    $sources = array_map(fn ($f) => $jobDir.DIRECTORY_SEPARATOR.$f, $meta['files'] ?? []);
                     $totalInputBytes = array_sum(array_map('filesize', array_filter($sources, 'file_exists')));
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . 'output_heic.pdf';
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.'output_heic.pdf';
                     $pageSize = PageSize::tryFrom($meta['page_size'] ?? '') ?? PageSize::A4;
                     $orientation = PageOrientation::tryFrom($meta['orientation'] ?? '') ?? PageOrientation::AUTO;
                     $margin = (float) ($meta['margin'] ?? 10.0);
@@ -345,7 +355,7 @@ class ProcessFileJob implements ShouldQueue
                         $pageSize,
                         $orientation,
                         $margin,
-                        $jobDir . DIRECTORY_SEPARATOR . 'heic_converted'
+                        $jobDir.DIRECTORY_SEPARATOR.'heic_converted'
                     );
                     $outputs[] = [
                         'original_name' => $meta['output_filename'] ?? 'heic_images_document.pdf',
@@ -360,10 +370,10 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::COMPRESS_PDF:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $outFilename = 'output_compressed.pdf';
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                     if (($meta['compression_method'] ?? 'preset') === 'target') {
                         $targetService = app(PdfTargetSizeCompressionService::class);
@@ -373,10 +383,10 @@ class ProcessFileJob implements ShouldQueue
                         $res = $targetService->compressToTarget($source, $outPath, $targetBytes, $priority);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_compressed.pdf',
-                            'stored_filename'      => $outFilename,
-                            'mime_type'            => 'application/pdf',
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'document').'_compressed.pdf',
+                            'stored_filename' => $outFilename,
+                            'mime_type' => 'application/pdf',
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => $res['processed_size'],
                         ];
 
@@ -394,10 +404,10 @@ class ProcessFileJob implements ShouldQueue
                         $res = $pdfCompress->compress($source, $outPath, $level);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_compressed.pdf',
-                            'stored_filename'      => $outFilename,
-                            'mime_type'            => 'application/pdf',
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'document').'_compressed.pdf',
+                            'stored_filename' => $outFilename,
+                            'mime_type' => 'application/pdf',
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => $res['processed_size'],
                         ];
 
@@ -410,36 +420,36 @@ class ProcessFileJob implements ShouldQueue
 
                 case ToolType::PDF_TO_JPG:
                 case ToolType::PDF_TO_PNG:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $format = ($job->tool_type === ToolType::PDF_TO_PNG) ? 'png' : 'jpg';
                     $dpi = (int) ($meta['dpi'] ?? 150);
-                    $renderDir = $jobDir . DIRECTORY_SEPARATOR . 'rendered_pages';
+                    $renderDir = $jobDir.DIRECTORY_SEPARATOR.'rendered_pages';
 
                     $images = $pdfToImage->convertPdfToImages($source, $renderDir, $format, $dpi);
 
                     if (count($images) === 1) {
                         $single = $images[0];
-                        $outFilename = 'output_page_1.' . $format;
-                        copy($single['path'], $jobDir . DIRECTORY_SEPARATOR . $outFilename);
+                        $outFilename = 'output_page_1.'.$format;
+                        copy($single['path'], $jobDir.DIRECTORY_SEPARATOR.$outFilename);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'page') . '.' . $format,
-                            'stored_filename'      => $outFilename,
-                            'mime_type'            => $single['mime_type'],
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'page').'.'.$format,
+                            'stored_filename' => $outFilename,
+                            'mime_type' => $single['mime_type'],
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => filesize($single['path']),
                         ];
                     } else {
                         // Zip multi-page output
-                        $zipPath = $jobDir . DIRECTORY_SEPARATOR . 'output_pages.zip';
+                        $zipPath = $jobDir.DIRECTORY_SEPARATOR.'output_pages.zip';
                         $zipRes = $archiver->createZip($images, $zipPath);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'document') . '_pages.zip',
-                            'stored_filename'      => 'output_pages.zip',
-                            'mime_type'            => 'application/zip',
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'document').'_pages.zip',
+                            'stored_filename' => 'output_pages.zip',
+                            'mime_type' => 'application/zip',
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => $zipRes['size_bytes'],
                         ];
                     }
@@ -448,11 +458,11 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::COMPRESS_IMAGE:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $ext = pathinfo($source, PATHINFO_EXTENSION);
-                    $outFilename = 'output_compressed.' . $ext;
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outFilename = 'output_compressed.'.$ext;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                     if (($meta['compression_method'] ?? 'preset') === 'target') {
                         $targetService = app(ImageTargetSizeCompressionService::class);
@@ -462,10 +472,10 @@ class ProcessFileJob implements ShouldQueue
                         $res = $targetService->compressToTarget($source, $outPath, $targetBytes, $priority);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'image') . '_compressed.' . $ext,
-                            'stored_filename'      => $outFilename,
-                            'mime_type'            => $res['mime_type'],
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'image').'_compressed.'.$ext,
+                            'stored_filename' => $outFilename,
+                            'mime_type' => $res['mime_type'],
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => $res['processed_size'],
                         ];
 
@@ -487,10 +497,10 @@ class ProcessFileJob implements ShouldQueue
                         $res = $imageCompress->compress($source, $outPath, $level);
 
                         $outputs[] = [
-                            'original_name'        => ($meta['clean_name'] ?? 'image') . '_compressed.' . $ext,
-                            'stored_filename'      => $outFilename,
-                            'mime_type'            => $res['mime_type'],
-                            'original_size_bytes'  => $totalInputBytes,
+                            'original_name' => ($meta['clean_name'] ?? 'image').'_compressed.'.$ext,
+                            'stored_filename' => $outFilename,
+                            'mime_type' => $res['mime_type'],
+                            'original_size_bytes' => $totalInputBytes,
                             'processed_size_bytes' => $res['processed_size'],
                         ];
 
@@ -502,17 +512,17 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::RESIZE_IMAGE:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $ext = pathinfo($source, PATHINFO_EXTENSION);
-                    $outFilename = 'output_resized.' . $ext;
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outFilename = 'output_resized.'.$ext;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
-                    $width = !empty($meta['target_width']) ? (int) $meta['target_width'] : (!empty($meta['width']) ? (int) $meta['width'] : null);
-                    $height = !empty($meta['target_height']) ? (int) $meta['target_height'] : (!empty($meta['height']) ? (int) $meta['height'] : null);
-                    $percentage = !empty($meta['percentage']) ? (int) $meta['percentage'] : null;
+                    $width = ! empty($meta['target_width']) ? (int) $meta['target_width'] : (! empty($meta['width']) ? (int) $meta['width'] : null);
+                    $height = ! empty($meta['target_height']) ? (int) $meta['target_height'] : (! empty($meta['height']) ? (int) $meta['height'] : null);
+                    $percentage = ! empty($meta['percentage']) ? (int) $meta['percentage'] : null;
 
-                    if ($percentage && !$width && !$height && file_exists($source)) {
+                    if ($percentage && ! $width && ! $height && file_exists($source)) {
                         $dims = @getimagesize($source);
                         if ($dims && $dims[0] > 0 && $dims[1] > 0) {
                             $pct = max(1, min(500, $percentage)) / 100.0;
@@ -522,15 +532,15 @@ class ProcessFileJob implements ShouldQueue
                     }
 
                     $fit = ImageFit::tryFrom($meta['fit'] ?? '') ?? ImageFit::CONTAIN;
-                    $quality = !empty($meta['quality']) ? (int) $meta['quality'] : 85;
+                    $quality = ! empty($meta['quality']) ? (int) $meta['quality'] : 85;
 
                     $res = $imageResize->resize($source, $outPath, $width, $height, $fit, $quality);
 
                     $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'image') . '_resized.' . $ext,
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => $res['mime_type'],
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => ($meta['clean_name'] ?? 'image').'_resized.'.$ext,
+                        'stored_filename' => $outFilename,
+                        'mime_type' => $res['mime_type'],
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['processed_size'] ?? $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
                     ];
                     $resultMeta['engine'] = 'gd';
@@ -538,40 +548,60 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::CONVERT_IMAGE:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $targetFormat = strtolower($meta['target_format'] ?? 'jpg');
-                    $outFilename = 'output_converted.' . $targetFormat;
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outFilename = 'output_converted.'.$targetFormat;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
-                    $res = $imageConvert->convert($source, $outPath, $targetFormat);
+                    $sourceMime = strtolower((string) ($meta['source_mime'] ?? ''));
+                    $isHeic = in_array($sourceMime, ['image/heic', 'image/heif'], true)
+                        || in_array(strtolower(pathinfo($source, PATHINFO_EXTENSION)), ['heic', 'heif'], true);
+                    $conversionSource = $source;
+                    $temporaryJpeg = null;
+
+                    try {
+                        if ($isHeic) {
+                            $temporaryJpeg = $jobDir.DIRECTORY_SEPARATOR.'heic_intermediate.jpg';
+                            $heicConvert->convertToJpeg($source, $temporaryJpeg);
+                            $conversionSource = $temporaryJpeg;
+                        }
+
+                        $res = $imageConvert->convert($conversionSource, $outPath, $targetFormat);
+                    } finally {
+                        if ($temporaryJpeg && is_file($temporaryJpeg)) {
+                            @unlink($temporaryJpeg);
+                        }
+                    }
 
                     $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'image') . '.' . $targetFormat,
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => $res['mime_type'],
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => ($meta['clean_name'] ?? 'image').'.'.$targetFormat,
+                        'stored_filename' => $outFilename,
+                        'mime_type' => $res['mime_type'],
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['processed_size'] ?? $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
                     ];
-                    $resultMeta['engine'] = 'gd';
-                    $resultMeta['engine_label'] = 'Image processing (GD)';
+                    $resultMeta['engine'] = $isHeic ? 'heic+gd' : 'gd';
+                    $resultMeta['engine_label'] = $isHeic
+                        ? 'HEIC decoding (Node/WASM) + image processing (GD)'
+                        : 'Image processing (GD)';
                     break;
 
                 case ToolType::REMOVE_BACKGROUND:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $outFilename = 'output_transparent.png';
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                     $bgService = app(ImageBackgroundService::class);
                     $options = $meta['options'] ?? [];
                     $res = $bgService->removeBackground($source, $outPath, $options);
 
                     $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'image') . '_nobg.png',
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => 'image/png',
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => ($meta['clean_name'] ?? 'image').'_nobg.png',
+                        'stored_filename' => $outFilename,
+                        'mime_type' => 'image/png',
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
                     ];
                     $resultMeta['engine'] = $res['engine'];
@@ -580,27 +610,27 @@ class ProcessFileJob implements ShouldQueue
                     break;
 
                 case ToolType::CHANGE_BACKGROUND:
-                    $source = $jobDir . DIRECTORY_SEPARATOR . ($meta['file'] ?? '');
+                    $source = $jobDir.DIRECTORY_SEPARATOR.($meta['file'] ?? '');
                     $totalInputBytes = file_exists($source) ? filesize($source) : 0;
                     $bgConfig = $meta['background_config'] ?? ['type' => 'solid', 'color' => '#FFFFFF'];
 
-                    if (($bgConfig['type'] ?? '') === 'image' && !empty($bgConfig['image_file'])) {
-                        $bgConfig['image_path'] = $jobDir . DIRECTORY_SEPARATOR . $bgConfig['image_file'];
+                    if (($bgConfig['type'] ?? '') === 'image' && ! empty($bgConfig['image_file'])) {
+                        $bgConfig['image_path'] = $jobDir.DIRECTORY_SEPARATOR.$bgConfig['image_file'];
                     }
 
                     $ext = ($bgConfig['type'] ?? '') === 'transparent' ? 'png' : 'png';
-                    $outFilename = 'output_changed.' . $ext;
-                    $outPath = $jobDir . DIRECTORY_SEPARATOR . $outFilename;
+                    $outFilename = 'output_changed.'.$ext;
+                    $outPath = $jobDir.DIRECTORY_SEPARATOR.$outFilename;
 
                     $bgService = app(ImageBackgroundService::class);
                     $options = $meta['options'] ?? [];
                     $res = $bgService->changeBackground($source, $outPath, $bgConfig, $options);
 
                     $outputs[] = [
-                        'original_name'        => ($meta['clean_name'] ?? 'image') . '_custom_bg.' . $ext,
-                        'stored_filename'      => $outFilename,
-                        'mime_type'            => 'image/png',
-                        'original_size_bytes'  => $totalInputBytes,
+                        'original_name' => ($meta['clean_name'] ?? 'image').'_custom_bg.'.$ext,
+                        'stored_filename' => $outFilename,
+                        'mime_type' => 'image/png',
+                        'original_size_bytes' => $totalInputBytes,
                         'processed_size_bytes' => $res['size_bytes'] ?? (file_exists($outPath) ? filesize($outPath) : 0),
                     ];
                     $resultMeta['engine'] = $res['engine'];
@@ -617,22 +647,22 @@ class ProcessFileJob implements ShouldQueue
 
                 foreach ($outputs as $out) {
                     ProcessedFile::create([
-                        'file_job_id'          => $job->id,
-                        'original_name'        => $out['original_name'],
-                        'stored_filename'      => $out['stored_filename'],
-                        'disk'                 => config('fileprocessor.storage.disk', 'local'),
-                        'mime_type'            => $out['mime_type'],
-                        'original_size_bytes'  => $out['original_size_bytes'],
+                        'file_job_id' => $job->id,
+                        'original_name' => $out['original_name'],
+                        'stored_filename' => $out['stored_filename'],
+                        'disk' => config('fileprocessor.storage.disk', 'local'),
+                        'mime_type' => $out['mime_type'],
+                        'original_size_bytes' => $out['original_size_bytes'],
                         'processed_size_bytes' => $out['processed_size_bytes'],
                     ]);
                 }
 
                 $job->update([
-                    'status'                 => JobStatus::COMPLETED,
+                    'status' => JobStatus::COMPLETED,
                     'processing_finished_at' => now(),
-                    'duration_ms'            => $durationMs,
-                    'input_metadata'         => $resultMeta,
-                    'error_message'          => null,
+                    'duration_ms' => $durationMs,
+                    'input_metadata' => $resultMeta,
+                    'error_message' => null,
                 ]);
 
                 $ip = $job->input_metadata['ip'] ?? '127.0.0.1';
@@ -646,6 +676,8 @@ class ProcessFileJob implements ShouldQueue
                 );
             });
 
+            $quota->settle($job);
+
             $this->releaseLockSafely($lock);
             Log::info("ProcessFileJob: Successfully completed job {$job->id} in {$durationMs}ms.");
         } catch (Throwable $e) {
@@ -656,11 +688,13 @@ class ProcessFileJob implements ShouldQueue
 
             $job = FileJob::find($this->fileJobId);
             if ($job) {
+                $quota = app(DailyFileQuotaService::class);
+                $quota->release($job);
                 $job->update([
-                    'status'                 => JobStatus::FAILED,
+                    'status' => JobStatus::FAILED,
                     'processing_finished_at' => now(),
-                    'duration_ms'            => $durationMs,
-                    'error_message'          => $e->getMessage(),
+                    'duration_ms' => $durationMs,
+                    'error_message' => $e->getMessage(),
                 ]);
 
                 $ip = $job->input_metadata['ip'] ?? '127.0.0.1';
@@ -679,9 +713,9 @@ class ProcessFileJob implements ShouldQueue
         }
     }
 
-    protected function releaseLockSafely(?\Illuminate\Contracts\Cache\Lock $lock): void
+    protected function releaseLockSafely(?Lock $lock): void
     {
-        if (!$lock) {
+        if (! $lock) {
             return;
         }
         try {
@@ -702,7 +736,7 @@ class ProcessFileJob implements ShouldQueue
         ];
 
         foreach ($patterns as $pattern) {
-            $matches = glob($jobDir . DIRECTORY_SEPARATOR . $pattern);
+            $matches = glob($jobDir.DIRECTORY_SEPARATOR.$pattern);
             if ($matches) {
                 foreach ($matches as $match) {
                     if (is_dir($match)) {
@@ -717,16 +751,17 @@ class ProcessFileJob implements ShouldQueue
 
     protected function deleteDirRecursively(string $dir): bool
     {
-        if (!file_exists($dir)) {
+        if (! file_exists($dir)) {
             return true;
         }
         foreach (scandir($dir) as $item) {
             if ($item === '.' || $item === '..') {
                 continue;
             }
-            $target = $dir . DIRECTORY_SEPARATOR . $item;
+            $target = $dir.DIRECTORY_SEPARATOR.$item;
             is_dir($target) ? $this->deleteDirRecursively($target) : @unlink($target);
         }
+
         return @rmdir($dir);
     }
 }

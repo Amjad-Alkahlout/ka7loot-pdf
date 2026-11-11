@@ -16,7 +16,9 @@ Contact: [akahloot2005@gmail.com](mailto:akahloot2005@gmail.com)
    - **Organize & Rotate PDF**: Arbitrary page reordering, selective deletion, and native 90°/180°/270° orientation rotation (`RotatableFpdi`).
    - **JPG to PDF**: Converts collections of JPG, PNG, and WebP images into PDFs with customizable page sizes (`A4`, `Letter`, `Legal`, `Fit to Image`), orientations, and margins.
    - **Image Compression & Optimization**: High-speed lossy and lossless compression for JPG, PNG, and WebP using Intervention Image v3 GD driver.
-   - **Image Resizing & Conversion**: Pixels-based image resizing (`Contain`, `Cover`, `Fill`) and format conversion across JPG, PNG, WebP, GIF, and BMP.
+   - **Image Resizing & Conversion**: Pixels-based image resizing (`Contain`, `Cover`, `Fill`) and format conversion across JPG, PNG, WebP, GIF, BMP, HEIC, and HEIF. HEIC/HEIF files are decoded with the bundled Node.js/WASM worker before conversion.
+   - **Daily Processing Quotas**: Guests can process 20 files per application day; Google-authenticated users can process 50. This is separate from the 50-file batch limit.
+   - **Google Sign-In**: Optional authentication uses only OpenID, profile, and email scopes. Google Drive access is never requested.
 
 2. **Dual-Engine PDF Compression Transparency**:
    - **Deep Compression (Ghostscript)**: Employs Ghostscript (`gs`) stream downsampling, font subsetting, and flate recompression when available on the host environment.
@@ -61,7 +63,7 @@ Contact: [akahloot2005@gmail.com](mailto:akahloot2005@gmail.com)
 ### 1. Host Requirements
 - PHP 8.5.5+ with GD, Exif, Intl, Fileinfo, and Zip extensions enabled in `php.ini`. Set `max_file_uploads = 50` so PHP accepts the application's 50-file batch limit.
 - MySQL 8.4+ database server.
-- Node.js 20+ & npm.
+- Node.js 20+ & npm. Node.js is required for HEIC/HEIF image conversion and HEIC-to-PDF processing.
 - *(Optional for Deep PDF Compression)* Ghostscript (`gs` / `gswin64c.exe`):
   ```powershell
   choco install ghostscript -y
@@ -97,6 +99,12 @@ Verify host capabilities and external binary discovery:
 ```bash
 php artisan app:check-system-binaries
 ```
+
+### 4. Configure Google Sign-In and Daily Quotas
+
+Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in `.env`, then register the callback URL with Google Cloud OAuth credentials. The application requests only `openid`, `email`, and `profile` scopes and does not request Google Drive access.
+
+Daily limits are configurable with `FP_DAILY_GUEST_FILES` (default `20`) and `FP_DAILY_AUTH_FILES` (default `50`). They apply across all processing tools. The existing `FP_MAX_BATCH_FILES=50` setting remains the per-request batch limit.
 
 ---
 
@@ -142,3 +150,4 @@ All tests cover:
 - Subprocess isolation & Ghostscript capability detection
 - ProcessFileJob idempotency and concurrent worker protection
 - Feature download validation, expiration rejection, immediate deletion, and RTL locale switching.
+- HEIC/HEIF validation and conversion through the Node.js/WASM worker.

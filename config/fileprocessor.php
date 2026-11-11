@@ -17,6 +17,11 @@ return [
         'max_total_batch_kb' => (int) env('FP_MAX_TOTAL_BATCH_KB', 102400), // 100 MB
     ],
 
+    'daily_quota' => [
+        'guest' => (int) env('FP_DAILY_GUEST_FILES', 20),
+        'authenticated' => (int) env('FP_DAILY_AUTH_FILES', 50),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Processing Timeouts
