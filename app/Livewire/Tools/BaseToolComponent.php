@@ -110,7 +110,7 @@ abstract class BaseToolComponent extends Component
             return;
         }
 
-        $job = FileJob::find($this->fileJobId);
+        $job = $this->findCurrentJob();
 
         if (! $job) {
             $this->jobStatus = 'failed';
@@ -164,7 +164,7 @@ abstract class BaseToolComponent extends Component
             return;
         }
 
-        $job = FileJob::find($this->fileJobId);
+        $job = $this->findCurrentJob();
         if ($job) {
             $storage->deleteJobDirectory($job->id);
             $job->update(['status' => JobStatus::EXPIRED]);
@@ -310,6 +310,23 @@ abstract class BaseToolComponent extends Component
             return null;
         }
 
-        return FileJob::find($this->fileJobId);
+        return $this->findCurrentJob();
+    }
+
+    protected function findCurrentJob(): ?FileJob
+    {
+        if (! $this->fileJobId) {
+            return null;
+        }
+
+        $query = FileJob::whereKey($this->fileJobId);
+
+        if (auth()->check()) {
+            $query->where('user_id', auth()->id());
+        } else {
+            $query->whereNull('user_id');
+        }
+
+        return $query->first();
     }
 }

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\FileDownloadController;
 use App\Http\Controllers\ClerkAuthController;
+use App\Http\Controllers\AccountController;
 use App\Http\Controllers\PublicShareDownloadController;
 use App\Livewire\Tools\ChangeImageBackgroundComponent;
 use App\Livewire\Tools\CompressImageComponent;
@@ -32,6 +33,12 @@ Route::post('/auth/logout', [ClerkAuthController::class, 'logout'])
 Route::post('/auth/sync', [ClerkAuthController::class, 'sync'])
     ->middleware('auth')
     ->name('auth.sync');
+Route::get('/account', [AccountController::class, 'show'])
+    ->middleware('auth')
+    ->name('account');
+Route::delete('/account', [AccountController::class, 'destroy'])
+    ->middleware(['auth', 'throttle:account-deletion'])
+    ->name('account.destroy');
 
 // PDF Tools
 Route::get('/merge-pdf', MergePdfComponent::class)->name('tools.merge-pdf');

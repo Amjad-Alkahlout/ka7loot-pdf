@@ -197,6 +197,7 @@
                 <div id="clerk-auth-controls" class="flex items-center gap-2" data-authenticated="{{ auth()->check() ? 'true' : 'false' }}">
                     @auth
                         <span class="hidden sm:inline text-xs font-semibold text-slate-600">{{ auth()->user()->name }}</span>
+                        <a href="{{ route('account') }}" class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.account') }}</a>
                         <button type="button" data-clerk-sign-out class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.sign_out') }}</button>
                     @else
                         <button type="button" data-clerk-sign-in class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">{{ __('ui.sign_in') }}</button>

@@ -26,6 +26,8 @@ class FileDownloadController extends Controller
             abort(Response::HTTP_NOT_FOUND, 'File job not found.');
         }
 
+        $this->ensureJobOwnership($job);
+
         if ($job->isExpired() || $job->status === JobStatus::EXPIRED) {
             abort(Response::HTTP_GONE, __('ui.expired_notice'));
         }
@@ -67,6 +69,8 @@ class FileDownloadController extends Controller
             return response()->json(['error' => 'Job not found.'], Response::HTTP_NOT_FOUND);
         }
 
+        $this->ensureJobOwnership($job);
+
         // Delete from disk
         $this->storage->deleteJobDirectory($job->id);
 
@@ -95,5 +99,12 @@ class FileDownloadController extends Controller
         }
 
         return redirect()->back();
+    }
+
+    protected function ensureJobOwnership(FileJob $job): void
+    {
+        if ($job->user_id !== null && (! auth()->check() || (int) $job->user_id !== (int) auth()->id())) {
+            abort(Response::HTTP_NOT_FOUND, 'File job not found.');
+        }
     }
 }

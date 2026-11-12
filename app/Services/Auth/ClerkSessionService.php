@@ -70,6 +70,32 @@ class ClerkSessionService
         ];
     }
 
+    public function deleteUser(string $clerkId): void
+    {
+        if (blank(config('clerk.secret_key'))) {
+            throw new \RuntimeException('Clerk server access is not configured.');
+        }
+
+        try {
+            $response = Http::withToken(config('clerk.secret_key'))
+                ->acceptJson()
+                ->timeout((int) config('clerk.api_timeout', 10))
+                ->delete(rtrim(config('clerk.api_url'), '/').'/users/'.rawurlencode($clerkId));
+
+            if ($response->status() === 404 || $response->successful()) {
+                return;
+            }
+
+            throw new \RuntimeException('Clerk account deletion was rejected with status '.$response->status().'.');
+        } catch (\Throwable $e) {
+            if ($e instanceof \RuntimeException && str_starts_with($e->getMessage(), 'Clerk account deletion was rejected')) {
+                throw $e;
+            }
+
+            throw new \RuntimeException('The Clerk account could not be deleted.', 0, $e);
+        }
+    }
+
     /**
      * @return array<string, mixed>
      */

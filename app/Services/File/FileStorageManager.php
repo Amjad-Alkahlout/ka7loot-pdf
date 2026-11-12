@@ -156,6 +156,15 @@ class FileStorageManager
         return Storage::disk($this->disk)->deleteDirectory($relativeJobPath);
     }
 
+    public function hasJobFile(string $jobId, string $filename): bool
+    {
+        $this->validateUuid($jobId);
+
+        return Storage::disk($this->disk)->exists(
+            $this->baseTempPath . '/' . $jobId . '/' . basename($filename)
+        );
+    }
+
     /**
      * Strict path traversal check.
      */

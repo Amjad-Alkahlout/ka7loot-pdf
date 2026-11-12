@@ -99,6 +99,31 @@ if (clerkConfig.publishableKey) {
             window.location.reload();
         });
 
+        document.querySelectorAll('[data-delete-account-form]').forEach((form) => {
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+
+                if (!window.confirm(form.dataset.confirmMessage || 'Delete account permanently?')) {
+                    return;
+                }
+
+                const response = await nativeFetch(form.action, {
+                    method: 'POST',
+                    body: new FormData(form),
+                    credentials: 'same-origin',
+                    headers: { Accept: 'text/html' },
+                });
+
+                if (response.ok) {
+                    await clerk.signOut();
+                    window.location.assign(response.url);
+                    return;
+                }
+
+                window.location.reload();
+            });
+        });
+
         const showSyncError = () => {
             const errorMessage = document.getElementById('clerk-auth-error');
             if (errorMessage) {

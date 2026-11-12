@@ -77,5 +77,9 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('public-share-access', function (Request $request) {
             return Limit::perMinute(60)->by($request->ip());
         });
+
+        RateLimiter::for('account-deletion', function (Request $request) {
+            return Limit::perMinute(3)->by($request->user()?->id ?: $request->ip());
+        });
     }
 }

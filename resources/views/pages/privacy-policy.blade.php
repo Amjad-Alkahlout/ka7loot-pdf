@@ -75,6 +75,10 @@
                             <li>نخزن عدادات الاستخدام اليومية ومعرّف جلسة عشوائياً للضيوف، دون أسماء الملفات أو محتوياتها.</li>
                         </ul>
                     </section>
+                    <section class="space-y-3">
+                        <h2 class="text-xl font-bold text-slate-900">7. حذف الحساب</h2>
+                        <p>يمكنك حذف حسابك نهائياً من صفحة الحساب. يؤدي ذلك إلى حذف هوية Clerk والحساب المحلي وسجل المعالجة والملفات المؤقتة وروابط المشاركة العامة وسجلات الحصص المرتبطة بحسابك.</p>
+                    </section>
                 @else
                     <section class="space-y-3">
                         <h2 class="text-xl font-bold text-slate-900">1. Our Privacy Commitment</h2>
@@ -138,6 +142,10 @@
                             <li>We do not store passwords or OAuth/provider access tokens. Clerk manages authentication and provider connections.</li>
                             <li>We store daily usage counters and a random guest-session identifier, not filenames or file contents.</li>
                         </ul>
+                    </section>
+                    <section class="space-y-3">
+                        <h2 class="text-xl font-bold text-slate-900">7. Account Deletion</h2>
+                        <p>You can permanently delete your account from the account page. This removes your Clerk identity, local account, processing history, temporary files, public share links, and quota records associated with your account.</p>
                     </section>
                 @endif
             </div>

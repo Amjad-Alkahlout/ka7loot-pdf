@@ -15,4 +15,5 @@ return [
     ))),
     'secret_key' => env('CLERK_SECRET_KEY'),
     'api_url' => env('CLERK_API_URL', 'https://api.clerk.com/v1'),
+    'api_timeout' => (int) env('CLERK_API_TIMEOUT', 10),
 ];
