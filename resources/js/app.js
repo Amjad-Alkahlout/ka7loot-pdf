@@ -1,8 +1,11 @@
 import './bootstrap';
 import { Clerk } from '@clerk/clerk-js';
+import { initNavigation } from './navigation';
 import { fileUploadHandler } from './upload-progress';
 import { pdfDrawSignature, pdfPlacementItem } from './sign-pdf';
 import { pdfEditorPreview, computeEffectiveFontSize, isRtlText } from './edit-pdf';
+import { previewUrlManager, getPreviewUrl, revokePreviewUrl, revokeAllPreviewUrls, canPreviewLocally } from './preview-url-manager';
+import { registerSortableDirective } from './sortable-directive';
 
 window.fileUploadHandler = fileUploadHandler;
 window.pdfDrawSignature = pdfDrawSignature;
@@ -10,6 +13,11 @@ window.pdfPlacementItem = pdfPlacementItem;
 window.pdfEditorPreview = pdfEditorPreview;
 window.computeEffectiveFontSize = computeEffectiveFontSize;
 window.isRtlText = isRtlText;
+window.previewUrlManager = previewUrlManager;
+window.getPreviewUrl = getPreviewUrl;
+window.revokePreviewUrl = revokePreviewUrl;
+window.revokeAllPreviewUrls = revokeAllPreviewUrls;
+window.canPreviewLocally = canPreviewLocally;
 
 const clerkConfig = window.clerkConfig || {};
 
@@ -86,17 +94,19 @@ if (clerkConfig.publishableKey) {
             });
         });
 
-        controls?.querySelector('[data-clerk-sign-out]')?.addEventListener('click', async () => {
-            await clerk.signOut();
-            await nativeFetch(clerkConfig.logoutUrl, {
-                method: 'POST',
-                headers: {
-                    'X-CSRF-TOKEN': clerkConfig.csrfToken,
-                    'Accept': 'application/json',
-                },
-                credentials: 'same-origin',
+        document.querySelectorAll('[data-clerk-sign-out]').forEach((button) => {
+            button.addEventListener('click', async () => {
+                await clerk.signOut();
+                await nativeFetch(clerkConfig.logoutUrl, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': clerkConfig.csrfToken,
+                        'Accept': 'application/json',
+                    },
+                    credentials: 'same-origin',
+                });
+                window.location.reload();
             });
-            window.location.reload();
         });
 
         document.querySelectorAll('[data-delete-account-form]').forEach((form) => {
@@ -191,11 +201,27 @@ if (clerkConfig.publishableKey) {
     });
 }
 
+const initAlpinePlugins = (Alpine) => {
+    if (!Alpine || Alpine._sortableRegistered) return;
+    Alpine._sortableRegistered = true;
+    Alpine.data('fileUploadHandler', fileUploadHandler);
+    Alpine.data('pdfDrawSignature', pdfDrawSignature);
+    Alpine.data('pdfPlacementItem', pdfPlacementItem);
+    Alpine.data('pdfEditorPreview', pdfEditorPreview);
+    Alpine.data('previewUrlManager', previewUrlManager);
+    registerSortableDirective(Alpine);
+};
+
 document.addEventListener('alpine:init', () => {
-    if (window.Alpine) {
-        window.Alpine.data('fileUploadHandler', fileUploadHandler);
-        window.Alpine.data('pdfDrawSignature', pdfDrawSignature);
-        window.Alpine.data('pdfPlacementItem', pdfPlacementItem);
-        window.Alpine.data('pdfEditorPreview', pdfEditorPreview);
-    }
+    initAlpinePlugins(window.Alpine);
 });
+
+if (window.Alpine) {
+    initAlpinePlugins(window.Alpine);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initNavigation);
+} else {
+    initNavigation();
+}

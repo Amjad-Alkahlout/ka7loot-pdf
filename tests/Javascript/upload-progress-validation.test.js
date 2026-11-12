@@ -278,3 +278,198 @@ test('unsupported file extension is rejected', () => {
     assert.equal(event.isStopped(), true);
     assert.equal(handler.errorMessage, 'Unsupported file format.');
 });
+
+test('queued batches upload sequentially and isolate progress by batch', () => {
+    const calls = [];
+    const handler = fileUploadHandler({
+        propertyName: 'newFiles',
+        multiple: true,
+        accept: '.heic,.heif',
+        fileType: 'image',
+        queueBatches: true,
+        locale: 'en',
+    });
+    handler.$wire = {
+        uploadMultiple(property, files, finish, error, progress) {
+            calls.push({ property, files, finish, error, progress });
+        },
+    };
+
+    const first = createMockEvent([
+        createMockFile('IMG_7995.HEIC', 2 * 1024 * 1024, 'image/heic'),
+    ]);
+    handler.handleFileSelect(first);
+
+    const second = createMockEvent([
+        createMockFile('IMG_7996.HEIC', 2 * 1024 * 1024, 'image/heic'),
+        createMockFile('IMG_7997.HEIC', 2 * 1024 * 1024, 'image/heic'),
+    ]);
+    handler.handleFileSelect(second);
+
+    assert.equal(first.isStopped(), true);
+    assert.equal(second.isStopped(), true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].files.length, 1);
+    calls[0].progress({ detail: { progress: 50 } });
+    assert.equal(handler.progress, 50);
+    calls[0].finish();
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].files.length, 2);
+    assert.equal(handler.progress, 0);
+    calls[0].progress({ detail: { progress: 100 } });
+    assert.equal(handler.progress, 0);
+    calls[1].progress({ detail: { progress: 75 } });
+    assert.equal(handler.progress, 75);
+    calls[1].finish();
+    assert.equal(handler.uploadState, 'idle');
+    assert.equal(handler.activeBatch, null);
+    assert.equal(handler.uploadQueue.length, 0);
+});
+
+test('batch 2 selected after initial batch completes advances batch counter and completes', () => {
+    const calls = [];
+    const handler = fileUploadHandler({
+        propertyName: 'newFiles',
+        multiple: true,
+        accept: '.heic,.heif',
+        fileType: 'image',
+        queueBatches: true,
+        locale: 'en',
+    });
+    handler.$wire = {
+        uploadMultiple(property, files, finish, error, progress) {
+            calls.push({ property, files, finish, error, progress });
+        },
+    };
+
+    // 1. First batch of 5 files uploaded from large dropzone
+    const batch1Files = [
+        createMockFile('IMG_1.HEIC', 1024, 'image/heic'),
+        createMockFile('IMG_2.HEIC', 1024, 'image/heic'),
+        createMockFile('IMG_3.HEIC', 1024, 'image/heic'),
+        createMockFile('IMG_4.HEIC', 1024, 'image/heic'),
+        createMockFile('IMG_5.HEIC', 1024, 'image/heic'),
+    ];
+    handler.handleFileSelect(createMockEvent(batch1Files));
+
+    assert.equal(handler.activeBatchId, 1);
+    assert.equal(handler.activeBatch, 1);
+    assert.equal(handler.uploadState, 'uploading');
+    assert.equal(calls.length, 1);
+
+    // Complete batch 1
+    calls[0].progress({ detail: { progress: 100 } });
+    calls[0].finish();
+
+    assert.equal(handler.uploadState, 'idle', 'Upload state resets to idle so compact bar can accept next batch');
+    assert.equal(handler.activeBatch, null);
+
+    // 2. Second batch of 3 files selected from compact bar
+    const batch2Files = [
+        createMockFile('IMG_6.HEIC', 1024, 'image/heic'),
+        createMockFile('IMG_7.HEIC', 1024, 'image/heic'),
+        createMockFile('IMG_8.HEIC', 1024, 'image/heic'),
+    ];
+    handler.handleFileSelect(createMockEvent(batch2Files));
+
+    assert.equal(calls.length, 2, 'Second batch must trigger uploadMultiple');
+    assert.equal(handler.activeBatchId, 2, 'Active batch counter must increment to 2');
+    assert.equal(handler.activeBatch, 2);
+    assert.equal(handler.uploadState, 'uploading');
+
+    calls[1].progress({ detail: { progress: 45 } });
+    assert.equal(handler.progress, 45);
+
+    calls[1].finish();
+    assert.equal(handler.uploadState, 'idle');
+    assert.equal(handler.activeBatch, null);
+    assert.equal(handler.uploadQueue.length, 0);
+});
+
+test('sequential thumbnail queue pauses during active upload and resumes on finish', () => {
+    class MockImage {
+        constructor() {
+            this._src = '';
+            setTimeout(() => {
+                if (this._src) this.onload?.();
+            }, 5);
+        }
+        set src(v) {
+            this._src = v;
+        }
+        get src() {
+            return this._src;
+        }
+    }
+    globalThis.Image = MockImage;
+
+    const handler = fileUploadHandler({
+        propertyName: 'newFiles',
+        multiple: true,
+        accept: '.heic,.heif',
+        fileType: 'image',
+        queueBatches: true,
+        locale: 'en',
+    });
+
+    // Simulate active batch uploading
+    handler.uploadState = 'uploading';
+    handler.activeBatch = 1;
+
+    let loadedCount = 0;
+    handler.enqueueThumbnail('/preview/1.jpg', () => { loadedCount++; });
+    handler.enqueueThumbnail('/preview/2.jpg', () => { loadedCount++; });
+
+    // While uploading is active, thumbnail processing must NOT start
+    assert.equal(handler.activeThumbnails, 0, 'Thumbnails must not start while upload is in-flight');
+    assert.equal(handler.thumbnailQueue.length, 2);
+
+    // Upload finishes
+    handler.uploadState = 'idle';
+    handler.activeBatch = null;
+    handler.processThumbnailQueue();
+
+    assert.equal(handler.activeThumbnails, 1, 'Only 1 thumbnail loads at a time');
+});
+
+test('batch failure or timeout enters error state and can be retried', () => {
+    const calls = [];
+    const handler = fileUploadHandler({
+        propertyName: 'newFiles',
+        multiple: true,
+        accept: '.heic,.heif',
+        fileType: 'image',
+        queueBatches: true,
+        locale: 'en',
+    });
+    handler.$wire = {
+        uploadMultiple(property, files, finish, error, progress) {
+            calls.push({ property, files, finish, error, progress });
+        },
+    };
+
+    const files = [createMockFile('failed.heic', 1024, 'image/heic')];
+    handler.handleFileSelect(createMockEvent(files));
+
+    assert.equal(handler.activeBatch, 1);
+    assert.equal(calls.length, 1);
+
+    // Simulate error callback
+    calls[0].error({ message: 'Network disconnected' });
+
+    assert.equal(handler.uploadState, 'error');
+    assert.equal(handler.errorMessage, 'Network disconnected');
+    assert.notEqual(handler.failedBatch, null);
+    assert.equal(handler.activeBatch, null);
+
+    // Retry failed batch
+    handler.retryFailedBatch();
+
+    assert.equal(calls.length, 2, 'Retry must start a new upload call');
+    assert.equal(handler.uploadState, 'uploading');
+    assert.equal(handler.errorMessage, null);
+
+    calls[1].finish();
+    assert.equal(handler.uploadState, 'idle');
+    assert.equal(handler.activeBatch, null);
+});

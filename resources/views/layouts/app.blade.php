@@ -163,9 +163,20 @@
     </style>
 </head>
 <body class="flex min-h-full flex-col bg-slate-50 text-slate-800">
+    @php
+        $dailyQuota = app(\App\Services\File\DailyFileQuotaService::class)->summary();
+        $quotaUsed = $dailyQuota['used'] + $dailyQuota['reserved'];
+        $quotaPercent = $dailyQuota['limit'] > 0 ? min(100, (int) round(($quotaUsed / $dailyQuota['limit']) * 100)) : 0;
+        $quotaRemaining = $dailyQuota['remaining'];
+        $quotaLimit = $dailyQuota['limit'];
+        $quotaStatusColor = $quotaRemaining === 0 ? 'bg-rose-500' : ($quotaPercent >= 80 ? 'bg-amber-500' : 'bg-emerald-500');
+        $quotaBarColor = $quotaRemaining === 0 ? 'bg-rose-500' : ($quotaPercent >= 80 ? 'bg-amber-500' : 'bg-emerald-600');
+    @endphp
+
     <!-- Navbar -->
-    <header class="sticky top-0 z-40 border-b border-slate-200/80 bg-white md:bg-white/95 md:backdrop-blur-md">
+    <header class="sticky top-0 z-40 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
         <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+            <!-- Brand -->
             <div class="flex items-center gap-3">
                 <a href="{{ route('home', [], false) }}" class="flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900 transition hover:opacity-90">
                     <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-md shadow-indigo-500/20">
@@ -188,32 +199,307 @@
                 <a href="{{ route('tools.compress-image') }}" class="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition">{{ __('tools.compress_image.title') }}</a>
             </nav>
 
-            <!-- Language Switcher & Security Pill -->
-            <div class="flex items-center gap-3">
-                @php($dailyQuota = app(\App\Services\File\DailyFileQuotaService::class)->summary())
-                <span class="hidden lg:inline text-xs font-semibold text-slate-500">
-                    {{ __('ui.daily_quota_short', ['remaining' => $dailyQuota['remaining'], 'limit' => $dailyQuota['limit']]) }}
-                </span>
-                <div id="clerk-auth-controls" class="flex items-center gap-2" data-authenticated="{{ auth()->check() ? 'true' : 'false' }}">
+            <!-- Right Controls: Quota Popover + Clerk Auth + Language + Mobile Toggle -->
+            <div class="flex items-center gap-2 sm:gap-3">
+                <!-- Interactive Daily Quota Popover Trigger -->
+                <div class="relative" id="quota-menu-container">
+                    <button type="button"
+                            id="quota-popover-button"
+                            aria-expanded="false"
+                            aria-haspopup="true"
+                            aria-controls="quota-popover"
+                            class="inline-flex items-center gap-1.5 sm:gap-2 rounded-full border border-slate-200/90 bg-white px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+                        <span class="inline-flex h-2 w-2 rounded-full {{ $quotaStatusColor }} ring-2 ring-white" aria-hidden="true"></span>
+                        <svg class="h-3.5 w-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span class="hidden sm:inline font-bold">{{ $quotaRemaining }}/{{ $quotaLimit }}</span>
+                        <span class="sm:hidden font-bold">{{ $quotaRemaining }}</span>
+                        <svg id="quota-chevron" class="h-3 w-3 text-slate-400 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+
+                    <!-- Floating Quota Popover Panel -->
+                    <div id="quota-popover"
+                         role="region"
+                         aria-label="{{ __('ui.daily_quota') }}"
+                         class="hidden absolute end-0 top-full mt-2 w-72 sm:w-80 rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-xl shadow-slate-900/10 z-50 transition-all duration-200">
+                        <div class="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                            <div class="flex items-center gap-2">
+                                <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                </span>
+                                <h3 class="text-sm font-bold text-slate-900">{{ __('ui.daily_quota') }}</h3>
+                            </div>
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold {{ $quotaRemaining === 0 ? 'bg-rose-50 text-rose-700' : ($quotaPercent >= 80 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700') }}">
+                                {{ $quotaRemaining }}/{{ $quotaLimit }} {{ __('ui.remaining') }}
+                            </span>
+                        </div>
+
+                        <!-- Progress Bar -->
+                        <div class="mt-3.5">
+                            <div class="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow="{{ $quotaUsed }}" aria-valuemin="0" aria-valuemax="{{ $quotaLimit }}" aria-label="{{ __('ui.daily_quota') }}">
+                                <div class="h-full rounded-full {{ $quotaBarColor }} transition-all duration-300" style="width: {{ $quotaPercent }}%"></div>
+                            </div>
+                            <div class="mt-2.5 flex items-center justify-between text-xs text-slate-500">
+                                <span>{{ __('ui.used') }}: <strong class="text-slate-800">{{ $dailyQuota['used'] }}</strong></span>
+                                @if($dailyQuota['reserved'] > 0)
+                                    <span>{{ __('ui.processing_reserved') }}: <strong class="text-indigo-600">{{ $dailyQuota['reserved'] }}</strong></span>
+                                @endif
+                                <span>{{ __('ui.remaining') }}: <strong class="text-slate-800">{{ $quotaRemaining }}</strong></span>
+                            </div>
+                        </div>
+
+                        <!-- Reset Time & Actions -->
+                        <div class="mt-4 pt-3 border-t border-slate-100 space-y-2.5 text-xs">
+                            <div class="flex items-center gap-1.5 text-slate-500">
+                                <svg class="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span>{{ __('ui.quota_resets_midnight') }}</span>
+                            </div>
+
+                            @auth
+                                <a href="{{ route('account') }}" class="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 font-semibold text-slate-700 hover:bg-slate-100 hover:text-indigo-600 transition">
+                                    <span>{{ __('ui.view_account') }}</span>
+                                    <span aria-hidden="true" class="rtl:rotate-180">&rarr;</span>
+                                </a>
+                            @else
+                                <button type="button" data-clerk-sign-in class="w-full flex items-center justify-center gap-1.5 rounded-xl bg-indigo-50 px-3 py-2 font-bold text-indigo-700 hover:bg-indigo-100 transition cursor-pointer">
+                                    <span>{{ __('ui.guest_quota_prompt') }}</span>
+                                    <span aria-hidden="true" class="rtl:rotate-180">&rarr;</span>
+                                </button>
+                            @endauth
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop Clerk Auth Controls -->
+                <div id="clerk-auth-controls" class="hidden sm:flex items-center gap-2" data-authenticated="{{ auth()->check() ? 'true' : 'false' }}">
                     @auth
-                        <span class="hidden sm:inline text-xs font-semibold text-slate-600">{{ auth()->user()->name }}</span>
+                        <span class="hidden lg:inline text-xs font-semibold text-slate-600">{{ auth()->user()->name }}</span>
                         <a href="{{ route('account') }}" class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.account') }}</a>
-                        <button type="button" data-clerk-sign-out class="text-xs font-semibold text-slate-600 hover:text-indigo-600">{{ __('ui.sign_out') }}</button>
+                        <button type="button" data-clerk-sign-out class="text-xs font-semibold text-slate-600 hover:text-indigo-600 cursor-pointer">{{ __('ui.sign_out') }}</button>
                     @else
-                        <button type="button" data-clerk-sign-in class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">{{ __('ui.sign_in') }}</button>
-                        <button type="button" data-clerk-sign-up class="hidden sm:inline text-xs font-semibold text-indigo-700 hover:text-indigo-900">{{ __('ui.sign_up') }}</button>
+                        <button type="button" data-clerk-sign-in class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 cursor-pointer">{{ __('ui.sign_in') }}</button>
+                        <button type="button" data-clerk-sign-up class="hidden lg:inline text-xs font-semibold text-indigo-700 hover:text-indigo-900 cursor-pointer">{{ __('ui.sign_up') }}</button>
                     @endauth
                 </div>
+
+                <!-- Language Switcher -->
                 <a href="{{ route('locale.switch', app()->getLocale() === 'en' ? 'ar' : 'en') }}"
-                   class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition">
+                   class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-xs hover:border-slate-300 hover:bg-slate-50 transition">
                     <svg class="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
                     </svg>
                     <span>{{ __('ui.switch_language') }}</span>
                 </a>
+
+                <!-- Mobile Hamburger Toggle Button -->
+                <button type="button"
+                        id="mobile-menu-button"
+                        aria-expanded="false"
+                        aria-controls="mobile-nav-drawer"
+                        aria-label="{{ __('ui.toggle_navigation') }}"
+                        class="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer">
+                    <svg id="mobile-hamburger-icon" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                    <svg id="mobile-close-icon" class="hidden h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
             </div>
         </div>
     </header>
+
+    <!-- Mobile Navigation Drawer Overlay & Panel -->
+    <div id="mobile-nav-drawer"
+         class="hidden fixed inset-0 z-50"
+         role="dialog"
+         aria-modal="true"
+         aria-labelledby="mobile-menu-title">
+        <!-- Backdrop with Fade -->
+        <div id="mobile-nav-backdrop"
+             class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs transition-opacity"
+             aria-hidden="true"></div>
+
+        <!-- Slide-over Drawer Panel -->
+        <div class="fixed inset-y-0 {{ $isRtl ? 'left-0' : 'right-0' }} max-w-full flex">
+            <div class="w-screen max-w-sm bg-white shadow-2xl flex flex-col h-full transform transition-transform ease-in-out duration-300">
+                <!-- Drawer Header -->
+                <div class="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                    <a href="{{ route('home', [], false) }}" class="flex items-center gap-2">
+                        <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 text-white shadow-xs">
+                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                        </span>
+                        <span id="mobile-menu-title" class="font-bold text-slate-900">{{ __('ui.app_name') }}</span>
+                    </a>
+                    <button type="button"
+                            id="mobile-drawer-close"
+                            aria-label="{{ __('ui.close_menu') }}"
+                            class="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition cursor-pointer">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Drawer Scrollable Content -->
+                <div class="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+                    <!-- Mobile Daily Quota Card -->
+                    <div class="rounded-2xl border border-slate-200/90 bg-slate-50/70 p-4">
+                        <div class="flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span class="inline-flex h-2 w-2 rounded-full {{ $quotaStatusColor }}"></span>
+                                <span class="text-xs font-bold text-slate-900">{{ __('ui.daily_quota') }}</span>
+                            </div>
+                            <span class="text-xs font-bold text-indigo-700">{{ $quotaRemaining }}/{{ $quotaLimit }}</span>
+                        </div>
+                        <div class="mt-2.5 h-2 w-full overflow-hidden rounded-full bg-slate-200/70">
+                            <div class="h-full rounded-full {{ $quotaBarColor }} transition-all" style="width: {{ $quotaPercent }}%"></div>
+                        </div>
+                        <div class="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                            <span>{{ __('ui.used') }}: {{ $dailyQuota['used'] }}</span>
+                            <span>{{ __('ui.remaining') }}: {{ $quotaRemaining }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Auth Section in Mobile Menu -->
+                    <div class="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-xs">
+                        @auth
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="min-w-0">
+                                    <p class="truncate text-xs font-bold text-slate-900">{{ auth()->user()->name }}</p>
+                                    <p class="truncate text-[11px] text-slate-500">{{ auth()->user()->email }}</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <a href="{{ route('account') }}" class="rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition">{{ __('ui.account') }}</a>
+                                    <button type="button" data-clerk-sign-out class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition cursor-pointer">{{ __('ui.sign_out') }}</button>
+                                </div>
+                            </div>
+                        @else
+                            <div class="grid grid-cols-2 gap-2">
+                                <button type="button" data-clerk-sign-in class="w-full rounded-xl bg-indigo-600 px-3 py-2 text-center text-xs font-bold text-white hover:bg-indigo-700 transition cursor-pointer">{{ __('ui.sign_in') }}</button>
+                                <button type="button" data-clerk-sign-up class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-xs font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer">{{ __('ui.sign_up') }}</button>
+                            </div>
+                        @endauth
+                    </div>
+
+                    <!-- Categorized Tools Links -->
+                    <nav class="space-y-4">
+                        <!-- PDF Essentials -->
+                        <div>
+                            <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">{{ __('ui.pdf_essentials') }}</p>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <a href="{{ route('tools.merge-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-red-500"></span>
+                                    <span>{{ __('tools.merge_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.split-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                                    <span>{{ __('tools.split_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.compress-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                                    <span>{{ __('tools.compress_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.organize-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+                                    <span>{{ __('tools.organize_pdf.title') }}</span>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Convert & Export -->
+                        <div>
+                            <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">{{ __('ui.convert_export') }}</p>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <a href="{{ route('tools.jpg-to-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-orange-500"></span>
+                                    <span>{{ __('tools.jpg_to_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.heic-to-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-pink-500"></span>
+                                    <span>{{ __('tools.heic_to_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.pdf-to-jpg') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>
+                                    <span>{{ __('tools.pdf_to_jpg.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.pdf-to-png') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+                                    <span>{{ __('tools.pdf_to_png.title') }}</span>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Security & Signing -->
+                        <div>
+                            <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">{{ __('ui.security_signing') }}</p>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <a href="{{ route('tools.sign-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-violet-500"></span>
+                                    <span>{{ __('tools.sign_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.edit-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-teal-500"></span>
+                                    <span>{{ __('tools.edit_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.protect-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>
+                                    <span>{{ __('tools.protect_pdf.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.unlock-pdf') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-cyan-500"></span>
+                                    <span>{{ __('tools.unlock_pdf.title') }}</span>
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Image Tools -->
+                        <div>
+                            <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">{{ __('ui.image_tools_menu') }}</p>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <a href="{{ route('tools.compress-image') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                                    <span>{{ __('tools.compress_image.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.resize-image') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-sky-500"></span>
+                                    <span>{{ __('tools.resize_image.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.convert-image') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-fuchsia-500"></span>
+                                    <span>{{ __('tools.convert_image.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.remove-background') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-purple-500"></span>
+                                    <span>{{ __('tools.remove_background.title') }}</span>
+                                </a>
+                                <a href="{{ route('tools.change-background') }}" class="flex items-center gap-2 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">
+                                    <span class="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+                                    <span>{{ __('tools.change_background.title') }}</span>
+                                </a>
+                            </div>
+                        </div>
+                    </nav>
+                </div>
+
+                <!-- Drawer Footer -->
+                <div class="border-t border-slate-100 p-4 bg-slate-50/50 flex items-center justify-between text-xs text-slate-500">
+                    <a href="{{ route('privacy-policy') }}" class="hover:text-indigo-600 transition">{{ __('ui.privacy_policy') }}</a>
+                    <a href="{{ route('terms-of-service') }}" class="hover:text-indigo-600 transition">{{ __('ui.terms_of_service') }}</a>
+                    <a href="{{ route('contact') }}" class="hover:text-indigo-600 transition">{{ __('ui.contact') }}</a>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="clerk-auth-error" class="hidden mx-auto mt-4 w-full max-w-7xl rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" role="alert" aria-live="assertive"></div>
 

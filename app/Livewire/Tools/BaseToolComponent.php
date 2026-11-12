@@ -153,6 +153,9 @@ abstract class BaseToolComponent extends Component
         if (property_exists($this, 'uploads')) {
             $this->uploads = [];
         }
+        if (property_exists($this, 'newFiles')) {
+            $this->newFiles = [];
+        }
     }
 
     /**

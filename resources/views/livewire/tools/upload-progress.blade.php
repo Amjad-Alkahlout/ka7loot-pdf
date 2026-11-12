@@ -1,10 +1,14 @@
 @props([
     'propertyName' => 'upload',
     'multiple' => false,
+    'queueBatches' => false,
     'accept' => 'application/pdf',
     'maxSizeMb' => null,
     'formatsHint' => null,
     'fileType' => null,
+    'compact' => false,
+    'hideQuota' => false,
+    'standalone' => true,
 ])
 
 @php
@@ -21,6 +25,7 @@
         : __('ui.error_file_too_large', ['size' => $resolvedMaxSizeMb]);
 @endphp
 
+@if(!$hideQuota)
 <div class="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-3 text-sm text-indigo-950">
     <div class="flex flex-wrap items-center justify-between gap-2">
         <span>{{ __('ui.daily_quota_remaining', ['remaining' => $dailyQuota['remaining'], 'limit' => $dailyQuota['limit']]) }}</span>
@@ -29,10 +34,13 @@
         @endif
     </div>
 </div>
+@endif
 
+@if($standalone)
 <div x-data="fileUploadHandler({
         propertyName: '{{ $propertyName }}',
         multiple: {{ $multiple ? 'true' : 'false' }},
+        queueBatches: {{ $queueBatches ? 'true' : 'false' }},
         accept: '{{ $accept }}',
         fileType: '{{ $resolvedFileType }}',
         maxSizeMb: {{ $resolvedMaxSizeMb }},
@@ -47,13 +55,18 @@
             unsupportedFormat: @js(__('ui.error_unsupported_format')),
             tooManyFiles: @js(__('ui.error_too_many_files', ['max' => $maxBatchFiles])),
             batchTooLarge: @js(__('ui.error_batch_too_large', ['max' => $maxTotalBatchMb])),
+            uploadTimedOut: @js(__('ui.upload_timed_out')),
+            uploadFailed: @js(__('ui.upload_failed')),
         }
     })"
      x-on:livewire-upload-start="onUploadStart($event)"
      x-on:livewire-upload-progress="onUploadProgress($event)"
      x-on:livewire-upload-finish="onUploadFinish($event)"
      x-on:livewire-upload-error="onUploadError($event)"
-     class="w-full space-y-4">
+     class="w-full">
+@else
+<div class="w-full space-y-4">
+@endif
 
     <!-- Pre-upload Client Validation Error Alert (Single File or Global Batch Error) -->
     <div x-show="errorMessage && (!rejectedFiles || rejectedFiles.length <= 1)"
@@ -114,6 +127,7 @@
     </div>
 
     <!-- UPLOADING / SELECTED STATE: Real Browser Upload Progress -->
+    @if(!$compact)
     <div x-show="uploadState === 'uploading' || uploadState === 'selected'"
          x-cloak
          class="rounded-3xl border border-indigo-100 bg-white p-6 sm:p-8 shadow-lg shadow-indigo-500/5 space-y-6">
@@ -217,38 +231,104 @@
             </button>
         </div>
     </div>
+    @endif
 
-    <!-- EMPTY / IDLE STATE: Drag and Drop Dropzone -->
-    <div x-show="uploadState === 'idle'" class="w-full">
-        <label @dragover.prevent="isDragging = true"
-               @dragleave.prevent="isDragging = false"
-               @drop.prevent="isDragging = false; onFileDrop($event)"
-               :class="isDragging ? 'border-indigo-500 bg-indigo-50/40 ring-4 ring-indigo-500/10' : 'border-slate-300 bg-white hover:border-indigo-400 hover:bg-indigo-50/20'"
-               class="group relative flex flex-col items-center justify-center rounded-3xl border-2 border-dashed p-12 text-center shadow-xs transition cursor-pointer">
+    @if($compact)
+        <!-- COMPACT DROPZONE: Single row bar with dashed border -->
+        <div x-show="uploadState === 'idle' || queueBatches" class="w-full">
+            <label @dragover.prevent="isDragging = true"
+                   @dragleave.prevent="isDragging = false"
+                   @drop.prevent="isDragging = false; onFileDrop($event)"
+                   :class="isDragging ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-500/20' : 'border-slate-300 bg-white hover:border-indigo-400 hover:bg-slate-50/80'"
+                   class="group relative flex items-center justify-center gap-2.5 rounded-2xl border-2 border-dashed py-3.5 px-4 text-center shadow-2xs transition cursor-pointer">
 
-            <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 group-hover:scale-110 transition">
-                <svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-            </div>
+                <template x-if="uploadState !== 'uploading' && uploadState !== 'error'">
+                    <div class="flex items-center gap-2">
+                        <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 group-hover:scale-105 transition">
+                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                        </span>
+                        <span class="text-xs sm:text-sm font-semibold text-slate-700 group-hover:text-indigo-600 transition">{{ __('ui.add_more_files') }}</span>
+                        <span class="text-xs text-slate-400 hidden sm:inline font-normal">({{ __('ui.drop_files_here') }})</span>
+                    </div>
+                </template>
 
-            <span class="text-lg font-semibold text-slate-900">{{ __('ui.select_files') }}</span>
-            <span class="mt-1 text-sm text-slate-500">{{ __('ui.drop_files_here') }}</span>
+                <template x-if="uploadState === 'uploading'">
+                    <div class="flex items-center justify-between w-full">
+                        <div class="flex items-center gap-2.5 text-xs font-semibold text-indigo-600">
+                            <svg class="h-4 w-4 animate-spin text-indigo-600 shrink-0" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                            <span x-text="queueBatches ? ('{{ __('ui.uploading_batch') }} ' + activeBatchId + ', ' + progress + '%') : ('{{ __('ui.uploading') }} ' + progress + '%')"></span>
+                        </div>
+                        <span class="text-xs font-semibold text-indigo-600 hover:underline">+ {{ __('ui.add_more_files') }}</span>
+                    </div>
+                </template>
 
-            <span class="mt-3 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-                @if($formatsHint)
-                    {{ $formatsHint }} &bull;
-                @endif
-                {{ __('ui.max_size_hint', ['size' => $resolvedMaxSizeMb]) }}
-            </span>
+                <template x-if="uploadState === 'error'">
+                    <div class="flex items-center justify-between w-full text-xs" @click.stop>
+                        <span class="font-medium text-rose-600 truncate mr-2" x-text="errorMessage"></span>
+                        <div class="flex items-center gap-2.5 shrink-0">
+                            <button type="button"
+                                    @click.prevent.stop="retryFailedBatch()"
+                                    class="font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer">
+                                {{ __('ui.retry') }}
+                            </button>
+                            <button type="button"
+                                    @click.prevent.stop="uploadState = 'idle'; errorMessage = null"
+                                    class="text-slate-400 hover:text-slate-600 cursor-pointer">
+                                {{ __('ui.close') }}
+                            </button>
+                        </div>
+                    </div>
+                </template>
 
-            <input type="file"
-                   x-ref="fileInput"
-                   wire:model="{{ $propertyName }}"
-                   @change.capture="handleFileSelect($event)"
-                   @if($multiple) multiple @endif
-                   accept="{{ $accept }}"
-                   class="sr-only">
-        </label>
-    </div>
+                <input type="file"
+                       x-ref="fileInput"
+                       @if(!$queueBatches) wire:model="{{ $propertyName }}" @endif
+                       @change.capture="handleFileSelect($event)"
+                       @if($multiple) multiple @endif
+                       :disabled="uploadState === 'uploading' && !queueBatches"
+                       accept="{{ $accept }}"
+                       class="sr-only">
+            </label>
+        </div>
+    @else
+        <!-- EMPTY / IDLE STATE: Drag and Drop Dropzone -->
+        <div x-show="uploadState === 'idle' || queueBatches" class="w-full">
+            <label @dragover.prevent="isDragging = true"
+                   @dragleave.prevent="isDragging = false"
+                   @drop.prevent="isDragging = false; onFileDrop($event)"
+                   :class="isDragging ? 'border-indigo-500 bg-indigo-50/40 ring-4 ring-indigo-500/10' : 'border-slate-300 bg-white hover:border-indigo-400 hover:bg-indigo-50/20'"
+                   class="group relative flex flex-col items-center justify-center rounded-3xl border-2 border-dashed p-12 text-center shadow-xs transition cursor-pointer">
+
+                <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 group-hover:scale-110 transition">
+                    <svg class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                </div>
+
+                <span class="text-lg font-semibold text-slate-900">{{ __('ui.select_files') }}</span>
+                <span class="mt-1 text-sm text-slate-500">{{ __('ui.drop_files_here') }}</span>
+
+                <span class="mt-3 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
+                    @if($formatsHint)
+                        {{ $formatsHint }} &bull;
+                    @endif
+                    {{ __('ui.max_size_hint', ['size' => $resolvedMaxSizeMb]) }}
+                </span>
+
+                <input type="file"
+                       x-ref="fileInput"
+                       @if(!$queueBatches) wire:model="{{ $propertyName }}" @endif
+                       @change.capture="handleFileSelect($event)"
+                       @if($multiple) multiple @endif
+                       :disabled="uploadState === 'uploading' && !queueBatches"
+                       accept="{{ $accept }}"
+                       class="sr-only">
+            </label>
+        </div>
+    @endif
 </div>
