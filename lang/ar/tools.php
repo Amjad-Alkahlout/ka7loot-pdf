@@ -14,6 +14,10 @@ return array (
     'action' => 'دمج الملفات الآن',
     'drop_zone' => 'انقر أو اسحب ملفات PDF هنا لرفعها',
     'files_selected' => 'تم اختيار :count ملف(ات)',
+    'reorder_hint' => 'اسحب المستندات أو استخدم الأسهم لإعادة ترتيب صفحات الدمج',
+    'inspect_file' => 'معاينة المستند',
+    'pages_count' => ':count صفحة',
+    'file_badge' => 'مستند :num',
     'move_up' => 'تحريك لأعلى',
     'move_down' => 'تحريك لأسفل',
     'remove' => 'إزالة',
@@ -88,6 +92,13 @@ return array (
     'error_duplicate_pages' => 'تم تكرار الصفحة :pages في النطاقات المحددة.',
     'error_empty_range' => 'يرجى إدخال نطاق صفحات صالح واحد على الأقل.',
     'error_every_n_invalid' => 'يرجى إدخال رقم صفحات صالح بين 1 و :max.',
+    'inspect_page' => 'معاينة الصفحة',
+    'high_res_inspection' => 'معاينة بدقة عالية',
+    'zoom_in' => 'تكبير',
+    'zoom_out' => 'تصغير',
+    'close_preview' => 'إغلاق',
+    'retry' => 'إعادة المحاولة',
+    'preview_loading' => 'جاري تحميل معاينة الصفحة...',
   ),
   'organize_pdf' => 
   array (
@@ -108,13 +119,22 @@ return array (
     'pages_retained' => 'تم الاحتفاظ بـ :count صفحة/صفحات',
     'error_no_pages' => 'يجب تضمين صفحة واحدة على الأقل في المستند.',
     'reset_all' => 'إعادة تعيين الكل',
+    'drag_hint' => 'اسحب الصفحات لإعادة الترتيب أو استخدم أزرار الأسهم',
+    'inspect_page' => 'معاينة الصفحة',
+    'high_res_inspection' => 'معاينة بدقة عالية',
+    'zoom_in' => 'تكبير',
+    'zoom_out' => 'تصغير',
+    'close_preview' => 'إغلاق',
+    'retry' => 'إعادة المحاولة',
+    'preview_loading' => 'جاري تحميل معاينة الصفحة...',
   ),
+
   'jpg_to_pdf' => 
   array (
     'title' => 'تحويل JPG إلى PDF',
     'desc' => 'حوّل صور JPG وPNG وWebP إلى مستند PDF أنيق وعالي الجودة مع التحكم في الترتيب والهوامش.',
     'action' => 'تحويل إلى PDF',
-    'reorder_hint' => 'استخدم الأسهم لإعادة ترتيب صفحات مستند PDF الناتج',
+    'reorder_hint' => 'اسحب الصور أو استخدم الأسهم لإعادة ترتيب صفحات مستند PDF الناتج',
     'dimensions' => ':width × :height بكسل',
     'move_up' => 'تحريك لأعلى',
     'move_down' => 'تحريك لأسفل',
@@ -132,7 +152,7 @@ return array (
     'title' => 'تحويل HEIC إلى PDF',
     'desc' => 'حوّل صور آيفون وآيباد بصيغة HEIC وHEIF إلى مستند PDF عالي الجودة مع ترتيب وحجم وهوامش مخصصة.',
     'action' => 'تحويل HEIC إلى PDF',
-    'reorder_hint' => 'استخدم الأسهم لترتيب صفحات PDF بالطريقة التي تفضلها.',
+    'reorder_hint' => 'اسحب الصور أو استخدم الأسهم لترتيب صفحات PDF بالطريقة التي تفضلها.',
     'page_size' => 'حجم الصفحة',
     'orientation' => 'الاتجاه',
     'margin' => 'الهوامش',
@@ -186,6 +206,7 @@ return array (
     'priority_balanced' => 'توازن بين الجودة والحجم',
     'priority_smallest' => 'تقليل الحجم إلى أقصى حد',
     'estimated_savings' => 'نسبة التخفيض المقدرة',
+    'preview_original' => 'الصورة الأصلية',
   ),
   'resize_image' => 
   array (
@@ -202,6 +223,8 @@ return array (
     'height' => 'الارتفاع (بكسل)',
     'percentage' => 'النسبة المئوية (%)',
     'maintain_ratio' => 'الحفاظ على أبعاد الصورة الأصلية',
+    'original_dimensions' => 'الأبعاد الأصلية',
+    'preview_original' => 'الصورة الأصلية',
   ),
   'convert_image' => 
   array (
@@ -211,6 +234,9 @@ return array (
     'target_format' => 'الصيغة المستهدفة',
     'engine' => 'معالجة الصور عبر GD مع دعم HEIC',
     'heic_note' => 'يتم فك ترميز صور HEIC وHEIF بشكل آمن قبل التحويل. يُنصح باستخدام JPG للحصول على أفضل نتيجة.',
+    'preview_original' => 'الصورة الأصلية',
+    'heic_badge' => 'صيغة HEIC / HEIF',
+    'heic_preview_notice' => 'المعاينة المباشرة غير مدعومة لـ HEIC في هذا المتصفح. سيتم التحويل بصورة آمنة على الخادم.',
   ),
   'protect_pdf' => 
   array (

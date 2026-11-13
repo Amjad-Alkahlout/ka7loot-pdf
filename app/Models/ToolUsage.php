@@ -37,11 +37,23 @@ class ToolUsage extends Model
 
     public static function log(string $toolType, string $ip, bool $successful, int $bytes, int $durationMs, ?string $fileJobId = null): self
     {
+        return self::logWithIpHash(
+            $toolType,
+            hash('sha256', $ip . config('app.key')),
+            $successful,
+            $bytes,
+            $durationMs,
+            $fileJobId
+        );
+    }
+
+    public static function logWithIpHash(string $toolType, string $ipHash, bool $successful, int $bytes, int $durationMs, ?string $fileJobId = null): self
+    {
         return self::updateOrCreate(
             ['file_job_id' => $fileJobId],
             [
                 'tool_type' => $toolType,
-                'ip_hash' => hash('sha256', $ip . config('app.key')),
+                'ip_hash' => $ipHash,
                 'is_successful' => $successful,
                 'bytes_processed' => $bytes,
                 'duration_ms' => $durationMs,

@@ -28,6 +28,8 @@ export function fileUploadHandler(config = {}) {
     return {
         propertyName: config.propertyName || 'upload',
         isMultiple: config.multiple || false,
+        queueBatches: config.queueBatches || false,
+        compact: config.compact || false,
         accept: config.accept || '',
         fileType: fileType,
         maxSizeMb: maxSizeMb,
@@ -36,7 +38,7 @@ export function fileUploadHandler(config = {}) {
         maxTotalBatchBytes: maxTotalBatchBytes,
         messages: messages,
 
-        uploadState: 'idle', // 'idle' | 'selected' | 'uploading' | 'uploaded'
+        uploadState: 'idle', // 'idle' | 'selected' | 'uploading' | 'uploaded' | 'error'
         progress: 0,
         uploadedBytes: 0,
         totalBytes: 0,
@@ -48,6 +50,28 @@ export function fileUploadHandler(config = {}) {
         isDragging: false,
         errorMessage: null,
         rejectedFiles: [],
+        uploadQueue: [],
+        activeBatchId: 0,
+        activeBatch: null,
+        activeBatchFiles: null,
+        failedBatch: null,
+        batchTimeoutTimer: null,
+        batchTimeoutMs: config.batchTimeoutMs || 45000,
+
+        showUploadControl() {
+            return this.compact || this.queueBatches || this.uploadState === 'idle';
+        },
+
+        // Sequential thumbnail loader state (concurrency limited to 1 so uploads are never blocked)
+        thumbnailQueue: [],
+        activeThumbnails: 0,
+        maxThumbnailConcurrency: 1,
+        thumbnailStatus: {},
+
+        // Lightbox modal state
+        activePreview: null,
+        activeFileName: '',
+        activeFileSize: '',
 
         validateFile(file) {
             if (!file) return null;
@@ -93,6 +117,13 @@ export function fileUploadHandler(config = {}) {
         handleFileSelect(e) {
             const rawFiles = e.target.files;
             if (!rawFiles || rawFiles.length === 0) return;
+
+            if (this.queueBatches) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                this.queueFiles(Array.from(rawFiles), e.target);
+                return;
+            }
 
             this.clearErrors();
 
@@ -181,6 +212,239 @@ export function fileUploadHandler(config = {}) {
             }
 
             this.prepareUpload(rawFiles);
+        },
+
+        queueFiles(rawFiles, input) {
+            this.clearErrors();
+            const filesArray = this.isMultiple ? rawFiles : rawFiles.slice(0, 1);
+
+            if (this.isMultiple && this.maxBatchFiles && filesArray.length > this.maxBatchFiles) {
+                if (input) input.value = '';
+                this.errorMessage = this.messages.tooManyFiles;
+                this.rejectedFiles = [];
+                return;
+            }
+
+            const validFiles = [];
+            const rejected = [];
+
+            for (const file of filesArray) {
+                const error = this.validateFile(file);
+                if (error) {
+                    rejected.push({ name: file.name, error });
+                } else {
+                    validFiles.push(file);
+                }
+            }
+
+            if (input) input.value = '';
+
+            const validTotalBytes = validFiles.reduce((total, file) => total + file.size, 0);
+            if (this.isMultiple && this.maxTotalBatchBytes && validTotalBytes > this.maxTotalBatchBytes) {
+                this.rejectedFiles = rejected;
+                this.errorMessage = this.messages.batchTooLarge;
+                return;
+            }
+
+            if (rejected.length) {
+                this.rejectedFiles = rejected;
+                this.errorMessage = rejected[0].error;
+            }
+
+            if (!validFiles.length) return;
+
+            this.uploadQueue.push(validFiles);
+            this.startNextBatch();
+        },
+
+        startNextBatch() {
+            if (this.activeBatch || this.uploadQueue.length === 0) return;
+
+            const files = this.uploadQueue.shift();
+            const batchId = ++this.activeBatchId;
+            this.activeBatch = batchId;
+            this.activeBatchFiles = files;
+            this.prepareUpload(files);
+            this.uploadState = 'uploading';
+            this.errorMessage = null;
+
+            if (!this.$wire || typeof this.$wire.uploadMultiple !== 'function') {
+                this.activeBatch = null;
+                this.activeBatchFiles = null;
+                this.uploadState = 'idle';
+                this.errorMessage = 'Upload is unavailable. Please try again.';
+                return;
+            }
+
+            // Start timeout safeguard
+            this.clearBatchTimeout();
+            this.batchTimeoutTimer = setTimeout(() => {
+                if (this.activeBatch === batchId) {
+                    console.warn(`Upload batch ${batchId} timed out.`);
+                    this.failBatch(batchId, this.messages.uploadTimedOut || 'Upload timed out. Please retry.');
+                }
+            }, this.batchTimeoutMs);
+            if (typeof this.batchTimeoutTimer?.unref === 'function') {
+                this.batchTimeoutTimer.unref();
+            }
+
+            this.$wire.uploadMultiple(
+                this.propertyName,
+                files,
+                () => this.finishBatch(batchId),
+                (err) => this.failBatch(batchId, err?.message || this.messages.uploadFailed || 'Upload failed. Please retry.'),
+                (event) => this.progressBatch(batchId, event)
+            );
+        },
+
+        progressBatch(batchId, event) {
+            if (this.activeBatch !== batchId) return;
+            const pct = typeof event === 'number' ? event : event?.detail?.progress ?? event?.progress;
+            this.applyUploadProgress(pct);
+
+            // Refresh timeout timer as long as progress is advancing
+            if (this.batchTimeoutTimer) {
+                clearTimeout(this.batchTimeoutTimer);
+                this.batchTimeoutTimer = setTimeout(() => {
+                    if (this.activeBatch === batchId) {
+                        this.failBatch(batchId, this.messages.uploadTimedOut || 'Upload timed out. Please retry.');
+                    }
+                }, this.batchTimeoutMs);
+                if (typeof this.batchTimeoutTimer?.unref === 'function') {
+                    this.batchTimeoutTimer.unref();
+                }
+            }
+        },
+
+        finishBatch(batchId) {
+            if (this.activeBatch !== batchId) return;
+            this.clearBatchTimeout();
+            this.applyUploadFinish();
+            this.activeBatch = null;
+            this.activeBatchFiles = null;
+            this.failedBatch = null;
+
+            if (this.uploadQueue.length > 0) {
+                this.startNextBatch();
+            } else {
+                // All queued batches completed: return to idle so UI displays add more files
+                this.uploadState = 'idle';
+                this.progress = 0;
+                // Resume thumbnail loading now that upload is complete
+                this.processThumbnailQueue();
+            }
+        },
+
+        failBatch(batchId, errorMsg) {
+            if (this.activeBatch !== batchId) return;
+            this.clearBatchTimeout();
+            const failedFiles = this.activeBatchFiles || [];
+            this.failedBatch = { id: batchId, files: failedFiles };
+            this.activeBatch = null;
+            this.activeBatchFiles = null;
+            this.uploadState = 'error';
+            this.errorMessage = errorMsg || this.messages.uploadFailed || 'Upload failed. Please retry.';
+            this.progress = 0;
+            // Resume thumbnail queue if uploads halted
+            this.processThumbnailQueue();
+        },
+
+        retryFailedBatch() {
+            if (!this.failedBatch || !this.failedBatch.files.length) return;
+            const files = this.failedBatch.files;
+            this.failedBatch = null;
+            this.errorMessage = null;
+            this.uploadState = 'idle';
+            this.uploadQueue.unshift(files);
+            this.startNextBatch();
+        },
+
+        clearBatchTimeout() {
+            if (this.batchTimeoutTimer) {
+                clearTimeout(this.batchTimeoutTimer);
+                this.batchTimeoutTimer = null;
+            }
+        },
+
+        // --- Sequential Thumbnail Loader ---
+        enqueueThumbnail(url, onLoaded, onError) {
+            if (!url) return;
+            if (this.thumbnailStatus[url] === 'loaded') {
+                onLoaded?.();
+                return;
+            }
+            if (this.thumbnailStatus[url] === 'failed') {
+                onError?.();
+                return;
+            }
+            this.thumbnailQueue.push({ url, onLoaded, onError });
+            this.processThumbnailQueue();
+        },
+
+        processThumbnailQueue() {
+            // High priority: Never block active batch uploads!
+            if (this.uploadState === 'uploading' && this.activeBatch) {
+                return;
+            }
+
+            if (this.activeThumbnails >= this.maxThumbnailConcurrency || this.thumbnailQueue.length === 0) {
+                return;
+            }
+
+            const item = this.thumbnailQueue.shift();
+            this.activeThumbnails++;
+            this.thumbnailStatus[item.url] = 'loading';
+
+            const img = new Image();
+            let settled = false;
+
+            const cleanup = () => {
+                settled = true;
+                this.activeThumbnails--;
+                // Process next thumbnail sequentially with a tiny yield to keep UI responsive
+                setTimeout(() => this.processThumbnailQueue(), 25);
+            };
+
+            img.onload = () => {
+                if (settled) return;
+                this.thumbnailStatus[item.url] = 'loaded';
+                item.onLoaded?.();
+                cleanup();
+            };
+
+            img.onerror = () => {
+                if (settled) return;
+                this.thumbnailStatus[item.url] = 'failed';
+                item.onError?.();
+                cleanup();
+            };
+
+            // 15-second safety timeout per thumbnail
+            const thumbTimer = setTimeout(() => {
+                if (!settled) {
+                    this.thumbnailStatus[item.url] = 'failed';
+                    item.onError?.();
+                    cleanup();
+                }
+            }, 15000);
+            if (typeof thumbTimer?.unref === 'function') {
+                thumbTimer.unref();
+            }
+
+            img.src = item.url;
+        },
+
+        // --- Lightbox Modal ---
+        openPreview(url, name, size) {
+            this.activePreview = url;
+            this.activeFileName = name || '';
+            this.activeFileSize = size || '';
+        },
+
+        closePreview() {
+            this.activePreview = null;
+            this.activeFileName = '';
+            this.activeFileSize = '';
         },
 
         prepareUpload(files) {
@@ -290,6 +554,7 @@ export function fileUploadHandler(config = {}) {
         },
 
         onUploadStart(e) {
+            if (this.queueBatches) return;
             if (e.detail && e.detail.property && e.detail.property !== this.propertyName) return;
 
             this.uploadState = 'uploading';
@@ -301,10 +566,15 @@ export function fileUploadHandler(config = {}) {
         },
 
         onUploadProgress(e) {
+            if (this.queueBatches) return;
             if (e.detail && e.detail.property && e.detail.property !== this.propertyName) return;
 
+            this.applyUploadProgress(e.detail.progress);
+        },
+
+        applyUploadProgress(progress) {
             this.uploadState = 'uploading';
-            const pct = Math.min(100, Math.max(0, parseInt(e.detail.progress, 10) || 0));
+            const pct = Math.min(100, Math.max(0, parseInt(progress, 10) || 0));
             this.progress = pct;
 
             if (this.totalBytes > 0) {
@@ -326,8 +596,13 @@ export function fileUploadHandler(config = {}) {
         },
 
         onUploadFinish(e) {
+            if (this.queueBatches) return;
             if (e.detail && e.detail.property && e.detail.property !== this.propertyName) return;
 
+            this.applyUploadFinish();
+        },
+
+        applyUploadFinish() {
             this.progress = 100;
             this.uploadedBytes = this.totalBytes;
             this.remainingSeconds = 0;
@@ -335,6 +610,7 @@ export function fileUploadHandler(config = {}) {
         },
 
         onUploadError(e) {
+            if (this.queueBatches) return;
             if (e.detail && e.detail.property && e.detail.property !== this.propertyName) return;
 
             this.reset();
@@ -374,6 +650,8 @@ export function fileUploadHandler(config = {}) {
             this.isDragging = false;
             this.errorMessage = null;
             this.rejectedFiles = [];
+            this.uploadQueue = [];
+            this.activeBatch = null;
             const input = this.$refs.fileInput || this.$el.querySelector('input[type="file"]');
             if (input) input.value = '';
         },

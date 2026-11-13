@@ -2,9 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\JobStatus;
+use App\Models\FileJob;
+use App\Models\ProcessedFile;
 use App\Services\File\FileStorageManager;
 use App\Services\Share\TemporaryShareService;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class PublicShareDownloadController extends Controller
@@ -13,6 +17,75 @@ class PublicShareDownloadController extends Controller
         protected TemporaryShareService $shareService,
         protected FileStorageManager $storage
     ) {}
+
+    /**
+     * Create a share for a completed job owned by the authenticated user or
+     * the current guest session.
+     */
+    public function create(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'job_id' => ['required', 'uuid'],
+            'file_id' => ['nullable', 'uuid'],
+            'expiration_minutes' => ['sometimes', 'integer', 'between:1,60'],
+            'max_downloads' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        $job = FileJob::find($data['job_id']);
+        abort_unless($job && $this->canManageJob($request, $job), Response::HTTP_NOT_FOUND);
+        abort_unless($job->status === JobStatus::COMPLETED && ! $job->isExpired(), Response::HTTP_GONE);
+
+        $file = null;
+        if (! empty($data['file_id'])) {
+            $file = $job->processedFiles()->whereKey($data['file_id'])->first();
+            abort_unless($file, Response::HTTP_NOT_FOUND);
+        }
+
+        $result = $this->shareService->createShare(
+            job: $job,
+            file: $file,
+            expirationMinutes: (int) ($data['expiration_minutes'] ?? 15),
+            maxDownloads: isset($data['max_downloads']) ? (int) $data['max_downloads'] : null,
+        );
+
+        return response()->json([
+            'url' => $result['url'],
+            'qr_svg' => $result['qr_svg'],
+            'expires_at' => $result['share']->expires_at->toIso8601String(),
+            'remaining_downloads' => $result['share']->remaining_downloads,
+        ], Response::HTTP_CREATED);
+    }
+
+    /** Revoke a share only for the owner of the associated job. */
+    public function revoke(Request $request, string $token): JsonResponse|Response
+    {
+        $share = $this->shareService->findShareByToken($token);
+        abort_unless($share && $share->fileJob && $this->canManageJob($request, $share->fileJob), Response::HTTP_NOT_FOUND);
+
+        $this->shareService->revokeShare($share);
+
+        if ($request->expectsJson()) {
+            return response()->json(['revoked' => true]);
+        }
+
+        return back()->with('status', __('tools.share.revoked_success'));
+    }
+
+    private function canManageJob(Request $request, FileJob $job): bool
+    {
+        if ($request->user()) {
+            return (int) $job->user_id === (int) $request->user()->getAuthIdentifier();
+        }
+
+        if ($job->user_id !== null) {
+            return false;
+        }
+
+        $jobSessionKey = $job->input_metadata['guest_session_key'] ?? null;
+
+        return is_string($jobSessionKey)
+            && hash_equals($jobSessionKey, FileJob::currentGuestSessionKey());
+    }
 
     /**
      * Show / redirect to the download endpoint for the shared file.

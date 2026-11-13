@@ -39,6 +39,7 @@ class JpgToPdfService
         $pdf->SetAutoPageBreak(false);
 
         $totalPages = 0;
+        $tempFiles = [];
 
         try {
             foreach ($imagePaths as $imgPath) {
@@ -92,7 +93,35 @@ class JpgToPdfService
                 $posX = $pageMargin + (($usableWidth - $finalWidth) / 2);
                 $posY = $pageMargin + (($usableHeight - $finalHeight) / 2);
 
-                $pdf->Image($imgPath, $posX, $posY, $finalWidth, $finalHeight);
+                // FPDF natively supports JPEG and PNG. For WebP, convert to temporary PNG via GD.
+                $sourceForPdf = $imgPath;
+                if ((($imgInfo[2] ?? 0) === IMAGETYPE_WEBP || ($imgInfo['mime'] ?? '') === 'image/webp') && function_exists('imagecreatefromwebp')) {
+                    // Safety check against excessively massive pixel dimensions that would exhaust memory
+                    if ((int) $imgWidthPx * (int) $imgHeightPx > 50_000_000) {
+                        throw new RuntimeException("Image dimensions ({$imgWidthPx}x{$imgHeightPx}) exceed safe processing limits.");
+                    }
+
+                    $gdImg = @imagecreatefromwebp($imgPath);
+                    if ($gdImg === false) {
+                        throw new RuntimeException("Failed to decode corrupt or invalid WebP image: " . basename($imgPath));
+                    }
+
+                    $tmpPng = tempnam(sys_get_temp_dir(), 'webp_pdf_') . '.png';
+                    $writeSuccess = imagepng($gdImg, $tmpPng);
+                    imagedestroy($gdImg);
+
+                    if (! $writeSuccess) {
+                        if (file_exists($tmpPng)) {
+                            @unlink($tmpPng);
+                        }
+                        throw new RuntimeException("Failed to write temporary image for PDF conversion.");
+                    }
+
+                    $tempFiles[] = $tmpPng;
+                    $sourceForPdf = $tmpPng;
+                }
+
+                $pdf->Image($sourceForPdf, $posX, $posY, $finalWidth, $finalHeight);
                 $totalPages++;
             }
 
@@ -109,6 +138,12 @@ class JpgToPdfService
             ];
         } catch (\Throwable $e) {
             throw new RuntimeException("Image to PDF conversion failed: {$e->getMessage()}", 0, $e);
+        } finally {
+            foreach ($tempFiles as $tempFile) {
+                if (file_exists($tempFile)) {
+                    @unlink($tempFile);
+                }
+            }
         }
     }
 }

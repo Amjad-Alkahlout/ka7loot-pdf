@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\JobStatus;
 use App\Livewire\Tools\CompressImageComponent;
 use App\Livewire\Tools\CompressPdfComponent;
+use App\Livewire\Tools\HeicToPdfComponent;
 use App\Livewire\Tools\MergePdfComponent;
 use App\Livewire\Tools\SplitPdfComponent;
 use App\Models\FileJob;
@@ -90,6 +91,28 @@ class UploadProgressAndStateTest extends TestCase
             ->assertSet('jobStatus', 'empty')
             ->assertSet('uploads', [])
             ->assertSee(__('ui.select_files'));
+    }
+
+    public function test_heic_batches_append_to_accepted_files_and_remove_individual_file(): void
+    {
+        $firstBatch = collect(range(1, 5))->map(
+            fn (int $index) => UploadedFile::fake()->create("first-{$index}.heic", 100, 'image/heic')
+        )->all();
+        $secondBatch = collect(range(1, 3))->map(
+            fn (int $index) => UploadedFile::fake()->create("second-{$index}.heic", 100, 'image/heic')
+        )->all();
+
+        $component = Livewire::test(HeicToPdfComponent::class)
+            ->set('newFiles', $firstBatch)
+            ->assertSet('newFiles', [])
+            ->assertCount('uploads', 5)
+            ->set('newFiles', $secondBatch)
+            ->assertSet('newFiles', [])
+            ->assertCount('uploads', 8)
+            ->call('removeFile', 2)
+            ->assertCount('uploads', 7);
+
+        $component->assertSee(__('ui.files_selected', ['count' => 7]));
     }
 
     public function test_state_separation_and_stepper(): void

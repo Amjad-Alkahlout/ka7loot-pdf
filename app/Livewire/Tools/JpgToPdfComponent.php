@@ -10,12 +10,16 @@ use App\Enums\PageSize;
 use App\Enums\ToolType;
 use App\Models\FileJob;
 use App\Services\File\FileStorageManager;
+use App\Services\Common\SortOrderValidator;
 use Illuminate\Support\Str;
 
 class JpgToPdfComponent extends BaseToolComponent
 {
     /** @var array<\Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
     public array $uploads = [];
+
+    /** @var array<\Livewire\Features\SupportFileUploads\TemporaryUploadedFile> */
+    public array $newFiles = [];
     public string $pageSize = 'a4';
     public string $orientation = 'auto';
     public float $margin = 10.0;
@@ -33,7 +37,41 @@ class JpgToPdfComponent extends BaseToolComponent
         }
     }
 
-    public function removeUpload(int $index): void
+    public function updatedNewFiles(): void
+    {
+        if (! $this->newFiles) {
+            return;
+        }
+
+        $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
+
+        $this->validate([
+            'newFiles.*' => "required|file|max:{$maxImageKb}",
+        ]);
+
+        $this->uploads = array_values([...$this->uploads, ...$this->newFiles]);
+        $this->newFiles = [];
+
+        if (!empty($this->uploads)) {
+            $this->jobStatus = 'uploaded';
+        }
+    }
+
+    public function getTotalSizeFormattedProperty(): string
+    {
+        $bytes = array_sum(array_map(
+            static fn ($upload): int => is_object($upload) && method_exists($upload, 'getSize') ? (int) $upload->getSize() : 0,
+            $this->uploads
+        ));
+
+        if ($bytes >= 1024 * 1024) {
+            return number_format($bytes / (1024 * 1024), 1) . ' MB';
+        }
+
+        return number_format($bytes / 1024, 1) . ' KB';
+    }
+
+    public function removeFile(int $index): void
     {
         unset($this->uploads[$index]);
         $this->uploads = array_values($this->uploads);
@@ -41,6 +79,11 @@ class JpgToPdfComponent extends BaseToolComponent
         if (empty($this->uploads)) {
             $this->jobStatus = 'empty';
         }
+    }
+
+    public function removeUpload(int $index): void
+    {
+        $this->removeFile($index);
     }
 
     public function moveUp(int $index): void
@@ -58,6 +101,22 @@ class JpgToPdfComponent extends BaseToolComponent
             $temp = $this->uploads[$index + 1];
             $this->uploads[$index + 1] = $this->uploads[$index];
             $this->uploads[$index] = $temp;
+        }
+    }
+
+    /**
+     * Reorder uploads via SortableJS strictly validated via SortOrderValidator.
+     */
+    public function reorderUploads(array $orderedIds): void
+    {
+        try {
+            $this->uploads = SortOrderValidator::applyStrictOrder(
+                $this->uploads,
+                $orderedIds,
+                fn ($f) => is_object($f) && method_exists($f, 'getFilename') ? $f->getFilename() : ''
+            );
+        } catch (\InvalidArgumentException) {
+            // Safely reject incomplete or malformed reorder payloads
         }
     }
 
@@ -90,6 +149,7 @@ class JpgToPdfComponent extends BaseToolComponent
             'orientation' => 'required|in:portrait,landscape,auto',
             'margin'      => 'required|numeric|min:0|max:50',
         ]);
+        $this->validateUploadBatchLimits($this->uploads);
 
         $this->jobStatus = 'processing';
         $this->statusMessage = __('ui.status_processing');
@@ -129,7 +189,7 @@ class JpgToPdfComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\JobStatus;
 use App\Enums\ToolType;
 use App\Jobs\ProcessFileJob;
+use App\Livewire\Tools\CompressPdfComponent;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
 use App\Models\ToolUsage;
@@ -13,6 +14,7 @@ use FPDF;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Livewire\Livewire;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -73,6 +75,11 @@ class ProcessFileJobIdempotencyTest extends TestCase
 
         $fileJob->refresh();
         $this->assertEquals(JobStatus::COMPLETED, $fileJob->status);
+        $expectedIpHash = hash('sha256', '192.168.1.10' . config('app.key'));
+        $this->assertArrayNotHasKey('ip', $fileJob->input_metadata);
+        $this->assertSame($expectedIpHash, $fileJob->input_metadata['ip_hash']);
+        $this->assertSame($expectedIpHash, ToolUsage::where('file_job_id', $jobId)->value('ip_hash'));
+        $this->assertArrayHasKey('guest_session_key', $fileJob->input_metadata);
         $this->assertEquals(1, ProcessedFile::where('file_job_id', $jobId)->count());
         $this->assertEquals(1, ToolUsage::where('file_job_id', $jobId)->count());
 
@@ -151,7 +158,13 @@ class ProcessFileJobIdempotencyTest extends TestCase
         } catch (\Throwable $e) {
             $fileJob->refresh();
             $this->assertEquals(JobStatus::FAILED, $fileJob->status);
-            $this->assertNotNull($fileJob->error_message);
+            $this->assertSame(__('ui.error_processing_generic'), $fileJob->error_message);
+            $this->assertStringNotContainsString('missing1.pdf', $fileJob->error_message);
+            $this->assertArrayNotHasKey('ip', $fileJob->input_metadata);
+            $this->assertSame(
+                hash('sha256', '127.0.0.1' . config('app.key')),
+                $fileJob->input_metadata['ip_hash']
+            );
             $this->assertEquals(1, ToolUsage::where('file_job_id', $jobId)->where('is_successful', false)->count());
         }
 
@@ -180,5 +193,22 @@ class ProcessFileJobIdempotencyTest extends TestCase
         $this->assertTrue((bool) ToolUsage::where('file_job_id', $jobId)->value('is_successful'));
 
         $this->storage->deleteJobDirectory($jobId);
+    }
+
+    public function test_failed_job_does_not_expose_persisted_exception_details_to_livewire(): void
+    {
+        $job = FileJob::create([
+            'tool_type' => ToolType::COMPRESS_PDF,
+            'status' => JobStatus::FAILED,
+            'error_message' => 'Unable to run C:\\private\\tools\\ghostscript.exe --secret-arg',
+            'input_metadata' => [],
+            'expires_at' => now()->addHour(),
+        ]);
+
+        Livewire::test(CompressPdfComponent::class)
+            ->set('fileJobId', $job->id)
+            ->call('pollJobStatus')
+            ->assertSet('jobStatus', 'failed')
+            ->assertSet('errorMessage', __('ui.error_processing_generic'));
     }
 }

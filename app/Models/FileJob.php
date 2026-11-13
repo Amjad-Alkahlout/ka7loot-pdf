@@ -42,6 +42,25 @@ class FileJob extends Model
             if (empty($job->user_id) && auth()->check()) {
                 $job->user_id = auth()->id();
             }
+
+            $metadata = $job->input_metadata ?? [];
+
+            // Guest jobs have no user_id, so bind their Livewire-visible job IDs
+            // to the session that created them. This keeps a leaked/tampered UUID
+            // from authorizing another guest session.
+            if ($job->user_id === null) {
+                $metadata['guest_session_key'] ??= self::currentGuestSessionKey();
+            }
+
+            // Keep the per-job metadata useful for analytics without retaining a
+            // raw client IP. ProcessFileJob reads the hash when it settles usage.
+            if (array_key_exists('ip', $metadata)) {
+                $metadata['ip_hash'] ??= hash('sha256', (string) $metadata['ip'] . config('app.key'));
+                unset($metadata['ip']);
+            }
+
+            $job->input_metadata = $metadata;
+
             if (empty($job->download_token)) {
                 $job->download_token = Str::random(48);
             }
@@ -83,5 +102,17 @@ class FileJob extends Model
     public function isExpired(): bool
     {
         return $this->status === JobStatus::EXPIRED || $this->expires_at->isPast();
+    }
+
+    public static function currentGuestSessionKey(): string
+    {
+        $key = session()->get('guest_file_job_key');
+
+        if (! is_string($key) || $key === '') {
+            $key = Str::uuid()->toString();
+            session()->put('guest_file_job_key', $key);
+        }
+
+        return $key;
     }
 }

@@ -15,10 +15,15 @@ class RemoveImageBackgroundComponent extends BaseToolComponent
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $upload = null;
 
+    public string $filename = '';
+    public int $fileSizeBytes = 0;
+    public string $fileSizeFormatted = '';
+    public int $imageWidth = 0;
+    public int $imageHeight = 0;
+
     public float $tolerance = 25.0;
     public int $feather = 2;
     public bool $floodFill = true;
-    public ?string $originalPreviewUri = null;
 
     public function updatedUpload(): void
     {
@@ -30,16 +35,56 @@ class RemoveImageBackgroundComponent extends BaseToolComponent
 
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
+            $this->filename = $this->upload->getClientOriginalName();
+            $this->fileSizeBytes = (int) $this->upload->getSize();
+            $this->fileSizeFormatted = $this->formatFileSize($this->fileSizeBytes);
+
             try {
                 $path = $this->upload->getRealPath();
                 if ($path && file_exists($path)) {
-                    $mime = $this->upload->getMimeType() ?: 'image/png';
-                    $data = file_get_contents($path);
-                    $this->originalPreviewUri = 'data:' . $mime . ';base64,' . base64_encode($data);
+                    $dims = @getimagesize($path);
+                    if ($dims) {
+                        $this->imageWidth = (int) $dims[0];
+                        $this->imageHeight = (int) $dims[1];
+                    }
                 }
             } catch (\Throwable) {
-                $this->originalPreviewUri = null;
+                $this->imageWidth = 0;
+                $this->imageHeight = 0;
             }
+        }
+    }
+
+    public function cancelToolUpload(): void
+    {
+        parent::cancelToolUpload();
+        $this->upload = null;
+        $this->filename = '';
+        $this->fileSizeBytes = 0;
+        $this->fileSizeFormatted = '';
+        $this->imageWidth = 0;
+        $this->imageHeight = 0;
+        $this->tolerance = 25.0;
+        $this->feather = 2;
+        $this->floodFill = true;
+    }
+
+    public function resetWorkflow(): void
+    {
+        parent::resetWorkflow();
+        $this->cancelToolUpload();
+    }
+
+    public function getPreviewUrl(): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        try {
+            return $this->upload->temporaryUrl();
+        } catch (\Throwable) {
+            return '';
         }
     }
 
@@ -91,14 +136,8 @@ class RemoveImageBackgroundComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
-    }
-
-    public function resetWorkflow(): void
-    {
-        parent::resetWorkflow();
-        $this->reset(['upload', 'originalPreviewUri']);
     }
 
     public function render()

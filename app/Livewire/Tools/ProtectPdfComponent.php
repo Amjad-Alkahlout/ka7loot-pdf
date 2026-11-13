@@ -11,6 +11,8 @@ use App\Models\ToolUsage;
 use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfProtectionService;
+use App\Services\Pdf\PdfSplitService;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Throwable;
@@ -19,6 +21,11 @@ class ProtectPdfComponent extends BaseToolComponent
 {
     /** @var TemporaryUploadedFile|null */
     public $upload = null;
+
+    public string $filename = '';
+    public int $fileSizeBytes = 0;
+    public string $fileSizeFormatted = '';
+    public int $pageCount = 1;
 
     public string $password = '';
 
@@ -40,7 +47,58 @@ class ProtectPdfComponent extends BaseToolComponent
 
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
+            $this->filename = $this->upload->getClientOriginalName();
+            $this->fileSizeBytes = (int) $this->upload->getSize();
+            $this->fileSizeFormatted = $this->formatFileSize($this->fileSizeBytes);
+
+            try {
+                $pdfSplit = app(PdfSplitService::class);
+                $this->pageCount = max(1, $pdfSplit->getPageCount($this->upload->getRealPath()));
+            } catch (\Throwable $e) {
+                $this->pageCount = 1;
+            }
+
+            if (! session()->has('preview_session_id')) {
+                session()->put('preview_session_id', session()->getId());
+            }
         }
+    }
+
+    public function cancelToolUpload(): void
+    {
+        parent::cancelToolUpload();
+        $this->filename = '';
+        $this->fileSizeBytes = 0;
+        $this->fileSizeFormatted = '';
+        $this->pageCount = 1;
+        $this->password = '';
+        $this->password_confirmation = '';
+    }
+
+    public function getPreviewUrl(int $page = 1, int $dpi = 120): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        $sessionId = (string) (session()->get('preview_session_id') ?: session()->getId());
+        session()->put('preview_session_id', $sessionId);
+
+        return URL::temporarySignedRoute(
+            'tools.pdf-preview',
+            now()->addHour(),
+            [
+                'filename'   => $this->upload->getFilename(),
+                'page'       => $page,
+                'dpi'        => $dpi,
+                'session_id' => $sessionId,
+            ]
+        );
+    }
+
+    public function getHighResPreviewUrl(int $page = 1): string
+    {
+        return $this->getPreviewUrl($page, 200);
     }
 
     public function process(
@@ -62,6 +120,7 @@ class ProtectPdfComponent extends BaseToolComponent
         try {
             $quota->assertAvailable();
         } catch (Throwable $e) {
+            $this->reset(['password', 'password_confirmation']);
             $this->addError('upload', $e->getMessage());
             $this->jobStatus = 'uploaded';
 
@@ -145,7 +204,7 @@ class ProtectPdfComponent extends BaseToolComponent
         } catch (Throwable $e) {
             $this->reset(['password', 'password_confirmation']);
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 

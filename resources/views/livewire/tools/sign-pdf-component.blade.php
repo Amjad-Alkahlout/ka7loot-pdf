@@ -113,11 +113,15 @@
                         id="pdf-page-container"
                         class="relative w-full max-w-2xl rounded-2xl border border-slate-300 bg-white shadow-md overflow-hidden select-none mx-auto"
                     >
-                        @if(!empty($pagePreviews[$currentPage]))
+                        @php
+                            $previewUrl = $this->getPagePreviewUrl($currentPage, 150);
+                        @endphp
+                        @if($previewUrl)
                             <img
-                                src="{{ $pagePreviews[$currentPage] }}"
+                                src="{{ $previewUrl }}"
                                 alt="PDF Page {{ $currentPage }}"
                                 class="w-full h-auto block select-none pointer-events-none"
+                                loading="lazy"
                             />
                         @else
                             <!-- Placeholder while Poppler generates high-DPI preview -->
@@ -143,15 +147,25 @@
                                         h: {{ $p['height_ratio'] * 100 }},
                                         rot: {{ $p['rotation'] ?? 0 }}
                                     })"
-                                    class="absolute cursor-move border-2 border-indigo-500 bg-indigo-50/20 rounded group transition-shadow hover:shadow-lg hover:border-indigo-600 select-none z-10 touch-none"
+                                    class="absolute cursor-move border-2 border-indigo-500 bg-indigo-50/20 rounded group transition-shadow hover:shadow-lg hover:border-indigo-600 select-none z-10 touch-none flex items-center justify-center overflow-hidden"
                                     :style="`left: ${x}%; top: ${y}%; width: ${w}%; height: ${h}%; transform: rotate(${rot}deg);`"
                                     @pointerdown="startDrag($event)"
                                 >
-                                    <img
-                                        src="{{ $p['signature_data'] }}"
-                                        alt="Signature"
-                                        class="w-full h-full object-contain pointer-events-none p-1 select-none"
-                                    />
+                                    @if(($p['signature_type'] ?? '') === 'type')
+                                        <div
+                                            class="w-full h-full flex items-center justify-center select-none p-1 text-center font-bold"
+                                            style="font-family: {{ $this->getAvailableStyles()[$p['signature_style'] ?? 'classic']['css'] ?? 'cursive' }}; font-size: clamp(14px, 3.5vw, 38px); color: #0f172a; line-height: 1.1;"
+                                        >
+                                            {{ $p['signature_text'] ?? '' }}
+                                        </div>
+                                    @else
+                                        <img
+                                            src="{{ $this->getSignaturePreviewUrl($p) }}"
+                                            alt="Signature"
+                                            class="w-full h-full object-contain pointer-events-none p-1 select-none"
+                                            loading="lazy"
+                                        />
+                                    @endif
 
                                     <!-- Delete Button -->
                                     <button
@@ -291,12 +305,13 @@
                                     </label>
                                 </div>
 
-                                @if($activeSignaturePreview)
-                                    <div class="rounded-xl border border-slate-200 bg-white p-3 text-center">
-                                        <span class="text-[11px] font-semibold text-slate-500 mb-2 block">{{ __('tools.sign_pdf.preview_label') }}</span>
-                                        <img src="{{ $activeSignaturePreview }}" alt="Uploaded Signature" class="max-h-20 mx-auto object-contain" />
-                                    </div>
-                                @endif
+                                <div wire:loading wire:target="signatureUpload" class="text-xs text-indigo-600 font-semibold text-center flex items-center justify-center gap-2 py-2">
+                                    <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                    </svg>
+                                    <span>{{ __('ui.status_processing') }}...</span>
+                                </div>
                             </div>
 
                         <!-- TAB 3: TYPE SIGNATURE WITH STYLE SELECTOR -->
@@ -380,8 +395,17 @@
                                 @foreach($placements as $idx => $item)
                                     <div class="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/50 p-2.5 text-xs">
                                         <div class="flex items-center gap-3">
-                                            <div class="h-8 w-12 bg-white rounded border border-slate-200 flex items-center justify-center overflow-hidden">
-                                                <img src="{{ $item['signature_data'] }}" alt="Sig" class="max-h-6 max-w-full object-contain" />
+                                            <div class="h-8 w-12 bg-white rounded border border-slate-200 flex items-center justify-center overflow-hidden p-0.5">
+                                                @if(($item['signature_type'] ?? '') === 'type')
+                                                    <span
+                                                        class="text-[11px] truncate max-w-full text-slate-900 select-none font-bold"
+                                                        style="font-family: {{ $this->getAvailableStyles()[$item['signature_style'] ?? 'classic']['css'] ?? 'cursive' }};"
+                                                    >
+                                                        {{ $item['signature_text'] ?? '' }}
+                                                    </span>
+                                                @else
+                                                    <img src="{{ $this->getSignaturePreviewUrl($item) }}" alt="Sig" class="max-h-6 max-w-full object-contain" loading="lazy" />
+                                                @endif
                                             </div>
                                             <div>
                                                 <span class="font-bold text-slate-900">{{ __('tools.sign_pdf.page') }} {{ $item['page'] }}</span>

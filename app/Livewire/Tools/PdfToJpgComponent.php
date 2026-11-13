@@ -8,7 +8,9 @@ use App\Enums\JobStatus;
 use App\Enums\ToolType;
 use App\Models\FileJob;
 use App\Services\File\FileStorageManager;
+use App\Services\Pdf\PdfSplitService;
 use App\Services\System\SystemBinaryDetector;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 class PdfToJpgComponent extends BaseToolComponent
@@ -16,6 +18,11 @@ class PdfToJpgComponent extends BaseToolComponent
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $upload = null;
     public int $dpi = 150;
+
+    public string $filename = '';
+    public int $fileSizeBytes = 0;
+    public string $fileSizeFormatted = '';
+    public int $pageCount = 1;
 
     public function updatedUpload(): void
     {
@@ -27,7 +34,56 @@ class PdfToJpgComponent extends BaseToolComponent
 
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
+            $this->filename = $this->upload->getClientOriginalName();
+            $this->fileSizeBytes = (int) $this->upload->getSize();
+            $this->fileSizeFormatted = $this->formatFileSize($this->fileSizeBytes);
+
+            try {
+                $pdfSplit = app(PdfSplitService::class);
+                $this->pageCount = max(1, $pdfSplit->getPageCount($this->upload->getRealPath()));
+            } catch (\Throwable $e) {
+                $this->pageCount = 1;
+            }
+
+            if (! session()->has('preview_session_id')) {
+                session()->put('preview_session_id', session()->getId());
+            }
         }
+    }
+
+    public function cancelToolUpload(): void
+    {
+        parent::cancelToolUpload();
+        $this->filename = '';
+        $this->fileSizeBytes = 0;
+        $this->fileSizeFormatted = '';
+        $this->pageCount = 1;
+    }
+
+    public function getPreviewUrl(int $page = 1, int $dpi = 120): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        $sessionId = (string) (session()->get('preview_session_id') ?: session()->getId());
+        session()->put('preview_session_id', $sessionId);
+
+        return URL::temporarySignedRoute(
+            'tools.pdf-preview',
+            now()->addHour(),
+            [
+                'filename'   => $this->upload->getFilename(),
+                'page'       => $page,
+                'dpi'        => $dpi,
+                'session_id' => $sessionId,
+            ]
+        );
+    }
+
+    public function getHighResPreviewUrl(int $page = 1): string
+    {
+        return $this->getPreviewUrl($page, 200);
     }
 
     public function process(
@@ -44,7 +100,7 @@ class PdfToJpgComponent extends BaseToolComponent
         ]);
 
         if (!$detector->hasPoppler()) {
-            $this->addError('upload', 'Poppler is required on the server to convert PDF to JPG.');
+            $this->addError('upload', __('ui.poppler_required_pdf_to_jpg'));
             return;
         }
 
@@ -78,7 +134,7 @@ class PdfToJpgComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 

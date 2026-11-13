@@ -249,10 +249,13 @@
                             class="relative bg-white shadow-2xl transition-all duration-150 origin-top"
                             style="width: {{ ($pageDimensions['width'] ?? 595.28) * ($zoomLevel / 100) }}px; height: {{ ($pageDimensions['height'] ?? 841.89) * ($zoomLevel / 100) }}px;"
                         >
-                            <!-- Rendered Poppler Page Image -->
-                            @if(!empty($pagePreviews[$currentPage]))
+                            <!-- Rendered Poppler Page Image via Signed URL -->
+                            @php
+                                $mainPreviewUrl = $this->getPagePreviewUrl($currentPage, 150);
+                            @endphp
+                            @if($mainPreviewUrl)
                                 <img
-                                    src="{{ $pagePreviews[$currentPage] }}"
+                                    src="{{ $mainPreviewUrl }}"
                                     alt="PDF Page {{ $currentPage }}"
                                     class="w-full h-full object-contain pointer-events-none select-none"
                                     draggable="false"
@@ -263,10 +266,9 @@
                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                                     </svg>
-                                    <span class="text-xs">Loading high-resolution page render...</span>
+                                    <span class="text-xs">{{ __('ui.high_res_preview_loading') }}</span>
                                 </div>
                             @endif
-
                             <!-- Text Selection & WYSIWYG Live Preview Layer -->
                             @if(!$isScanned)
                                 @php
@@ -402,22 +404,51 @@
                     </div>
 
                     <!-- Bottom Thumbnail Strip (if multi-page) -->
-                    @if($pageCount > 1 && !empty($pageThumbnails))
+                    @if($pageCount > 1)
                         <div class="w-full mt-4 p-3 bg-white rounded-2xl border border-slate-200 overflow-x-auto flex items-center gap-3 shadow-xs">
                             @foreach(range(1, $pageCount) as $pNum)
                                 <button
+                                    type="button"
+                                    wire:key="edit-thumb-{{ $pNum }}"
                                     wire:click="goToPage({{ $pNum }})"
+                                    x-data="pdfProgressivePreview({
+                                        url: '{{ $this->getThumbnailUrl($pNum, 80) }}',
+                                        highResUrl: '{{ $this->getPagePreviewUrl($pNum, 150) }}',
+                                        page: {{ $pNum }},
+                                        refreshUrl: () => $wire.getThumbnailUrl({{ $pNum }}, 80),
+                                        refreshHighResUrl: () => $wire.getPagePreviewUrl({{ $pNum }}, 150)
+                                    })"
                                     class="relative shrink-0 rounded-lg overflow-hidden border-2 transition cursor-pointer {{ $currentPage === $pNum ? 'border-indigo-600 ring-2 ring-indigo-100 shadow-xs' : 'border-slate-200 hover:border-slate-300 opacity-70 hover:opacity-100' }}"
                                     style="width: 70px; height: 95px;"
                                 >
-                                    @if(isset($pageThumbnails[$pNum]))
-                                        <img src="{{ $pageThumbnails[$pNum] }}" alt="Page {{ $pNum }}" class="w-full h-full object-contain bg-white" />
-                                    @else
-                                        <div class="w-full h-full bg-slate-100 flex items-center justify-center text-xs text-slate-400 font-bold">
-                                            {{ $pNum }}
-                                        </div>
-                                    @endif
-                                    <span class="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[9px] font-bold px-1 rounded">
+                                    <!-- Skeleton while loading -->
+                                    <div
+                                        x-show="!loaded && !error"
+                                        class="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 animate-pulse text-slate-400"
+                                    >
+                                        <svg class="h-5 w-5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <span class="text-[10px] font-bold mt-1">{{ $pNum }}</span>
+                                    </div>
+
+                                    <!-- Loaded preview image -->
+                                    <img
+                                        x-show="loaded"
+                                        :src="url"
+                                        alt="Page {{ $pNum }}"
+                                        class="w-full h-full object-contain bg-white"
+                                    />
+
+                                    <!-- Error fallback -->
+                                    <div
+                                        x-show="error"
+                                        class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 text-slate-400 text-xs font-bold"
+                                    >
+                                        {{ $pNum }}
+                                    </div>
+
+                                    <span class="absolute bottom-1 right-1 bg-slate-900/80 text-white text-[9px] font-bold px-1 rounded z-10">
                                         {{ $pNum }}
                                     </span>
                                 </button>

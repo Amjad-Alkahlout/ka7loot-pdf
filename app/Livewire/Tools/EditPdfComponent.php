@@ -13,10 +13,11 @@ use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfAnnotationApplierService;
 use App\Services\Pdf\PdfiumTextEditorService;
-use App\Services\Pdf\PdfThumbnailService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+use Livewire\Attributes\Computed;
 use Livewire\WithFileUploads;
 use RuntimeException;
 use Throwable;
@@ -67,25 +68,18 @@ class EditPdfComponent extends BaseToolComponent
 
     public array $pageDimensions = []; // ['width' => float, 'height' => float, 'rotation' => int]
 
-    public array $allPageDimensionsByPage = []; // page_index => ['width' => float, 'height' => float, 'rotation' => int]
-
     public array $pageNativeEditable = []; // page_number (1-based) => bool
 
     public array $pageHasType3 = [];       // page_number (1-based) => bool
 
     public array $pageWarnings = [];       // page_number (1-based) => string|null
 
-    // Previews & navigation
-    public array $pagePreviews = []; // page => base64
-
-    public array $pageThumbnails = []; // page => base64
-
     public int $zoomLevel = 100; // 50, 75, 100, 125, 150
 
-    // Text objects & active selection
-    public array $allTextObjectsByPage = []; // page_index => text_objects
+    // Active page text objects & groups (Hydrated on-demand per active page)
+    public array $currentTextObjects = [];
 
-    public array $allTextGroupsByPage = [];  // page_index => text_groups
+    public array $currentTextGroups = [];
 
     public ?string $selectedObjectId = null;
 
@@ -160,10 +154,15 @@ class EditPdfComponent extends BaseToolComponent
             $this->passwordRequired = false;
             $this->passwordError = null;
 
-            // Cache text objects, logical groups, and dimensions by page index
-            $this->allTextObjectsByPage = [];
-            $this->allTextGroupsByPage = [];
-            $this->allPageDimensionsByPage = [];
+            // Cache full document inspection securely server-side in the authorized job directory
+            if ($this->jobId) {
+                $storage = app(FileStorageManager::class);
+                $jobDir = $storage->getJobDirectory($this->jobId);
+                $inspectionPath = $jobDir.DIRECTORY_SEPARATOR.'inspection.json';
+                @file_put_contents($inspectionPath, json_encode($inspection, JSON_UNESCAPED_UNICODE));
+            }
+
+            // Populate lightweight page-level capability maps (only store non-default overrides)
             $this->pageNativeEditable = [];
             $this->pageHasType3 = [];
             $this->pageWarnings = [];
@@ -171,35 +170,20 @@ class EditPdfComponent extends BaseToolComponent
             foreach ($inspection['pages'] ?? [] as $pData) {
                 $pIdx = (int) $pData['page_index'];
                 $pageNum = $pIdx + 1;
-                $this->pageNativeEditable[$pageNum] = (bool) ($pData['native_editable'] ?? true);
-                $this->pageHasType3[$pageNum] = (bool) ($pData['has_type3_fonts'] ?? false);
-                $this->pageWarnings[$pageNum] = $pData['warning']['message'] ?? ($pData['editable_reason'] ?? null);
-
-                $dims = [
-                    'width' => (float) ($pData['width'] ?? 595.28),
-                    'height' => (float) ($pData['height'] ?? 841.89),
-                    'rotation' => (int) ($pData['rotation'] ?? 0),
-                ];
-                $this->allPageDimensionsByPage[$pIdx] = $dims;
-
-                $objs = [];
-                foreach ($pData['text_objects'] ?? [] as $to) {
-                    $to['object_id'] = $to['id'] ?? ($to['object_id'] ?? null);
-                    $objs[] = $to;
+                if (! ($pData['native_editable'] ?? true)) {
+                    $this->pageNativeEditable[$pageNum] = false;
+                    $warning = $pData['warning']['message'] ?? ($pData['editable_reason'] ?? null);
+                    if (! empty($warning)) {
+                        $this->pageWarnings[$pageNum] = $warning;
+                    }
                 }
-                $this->allTextObjectsByPage[$pIdx] = $objs;
-                $this->allTextGroupsByPage[$pIdx] = $pData['text_groups'] ?? [];
-
-                if ($pIdx === ($this->currentPage - 1)) {
-                    $this->pageDimensions = $dims;
+                if (! empty($pData['has_type3_fonts'])) {
+                    $this->pageHasType3[$pageNum] = true;
                 }
             }
 
             $this->currentPage = 1;
-
-            // Load high-res preview and thumbnails if poppler available
-            $this->loadPagePreview(1);
-            $this->loadThumbnails();
+            $this->loadPageTextData(1);
 
             $this->jobStatus = 'ready';
         } catch (RuntimeException $e) {
@@ -210,13 +194,131 @@ class EditPdfComponent extends BaseToolComponent
                 $this->passwordError = $password ? __('tools.unlock_pdf.error_invalid_password') : null;
                 $this->jobStatus = 'ready';
             } else {
-                $this->errorMessage = $msg;
+                $this->errorMessage = $this->reportToolFailure($e);
                 $this->jobStatus = 'failed';
             }
         } catch (Throwable $e) {
             Log::error('EditPdfComponent: inspection failed: '.$e->getMessage());
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
             $this->jobStatus = 'failed';
+        }
+    }
+
+    /**
+     * Retrieve full document inspection from server-side storage without bloating Livewire public state.
+     */
+    public function getInspectionData(): ?array
+    {
+        if ($this->jobId) {
+            $storage = app(FileStorageManager::class);
+            $jobDir = $storage->getJobDirectory($this->jobId);
+            $inspectionPath = $jobDir.DIRECTORY_SEPARATOR.'inspection.json';
+
+            if (file_exists($inspectionPath)) {
+                $content = @file_get_contents($inspectionPath);
+                if ($content) {
+                    $decoded = json_decode($content, true);
+                    if (is_array($decoded)) {
+                        return $decoded;
+                    }
+                }
+            }
+        }
+
+        // Resilient fallback: re-inspect source PDF if inspection file is missing
+        if ($this->storedSourcePath && file_exists($this->storedSourcePath)) {
+            try {
+                $pdfium = app(PdfiumTextEditorService::class);
+                $inspection = $pdfium->inspectDocument($this->storedSourcePath, $this->password ?: null);
+                if ($this->jobId) {
+                    $storage = app(FileStorageManager::class);
+                    $jobDir = $storage->getJobDirectory($this->jobId);
+                    $inspectionPath = $jobDir.DIRECTORY_SEPARATOR.'inspection.json';
+                    @file_put_contents($inspectionPath, json_encode($inspection, JSON_UNESCAPED_UNICODE));
+                }
+
+                return $inspection;
+            } catch (Throwable $e) {
+                Log::warning('EditPdfComponent: Failed to re-inspect document: '.$e->getMessage());
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Hydrate text objects, logical groups, and dimensions for the active page only.
+     */
+    public function loadPageTextData(int $page): void
+    {
+        $inspection = $this->getInspectionData();
+        if (! $inspection || empty($inspection['pages'])) {
+            $this->currentTextObjects = [];
+            $this->currentTextGroups = [];
+
+            return;
+        }
+
+        $pIdx = $page - 1;
+        $pageData = null;
+        foreach ($inspection['pages'] as $p) {
+            if ((int) ($p['page_index'] ?? -1) === $pIdx) {
+                $pageData = $p;
+                break;
+            }
+        }
+
+        if (! $pageData) {
+            $this->currentTextObjects = [];
+            $this->currentTextGroups = [];
+
+            return;
+        }
+
+        $this->pageDimensions = [
+            'width' => (float) ($pageData['width'] ?? 595.28),
+            'height' => (float) ($pageData['height'] ?? 841.89),
+            'rotation' => (int) ($pageData['rotation'] ?? 0),
+        ];
+
+        $objs = [];
+        foreach ($pageData['text_objects'] ?? [] as $to) {
+            $objs[] = [
+                'object_id' => $to['id'] ?? ($to['object_id'] ?? null),
+                'text' => (string) ($to['text'] ?? ''),
+                'font_size' => round((float) ($to['font_size'] ?? 12), 1),
+                'bbox' => [
+                    'left' => round((float) ($to['bbox']['left'] ?? 0), 2),
+                    'top' => round((float) ($to['bbox']['top'] ?? 0), 2),
+                    'width' => round((float) ($to['bbox']['width'] ?? 20), 2),
+                    'height' => round((float) ($to['bbox']['height'] ?? 10), 2),
+                ],
+            ];
+        }
+
+        $grps = [];
+        foreach ($pageData['text_groups'] ?? [] as $tg) {
+            $grps[] = [
+                'group_id' => $tg['group_id'] ?? null,
+                'text' => (string) ($tg['text'] ?? ''),
+                'font_size' => round((float) ($tg['font_size'] ?? 12), 1),
+                'bounding_box' => [
+                    'left' => round((float) ($tg['bounding_box']['left'] ?? 0), 2),
+                    'top' => round((float) ($tg['bounding_box']['top'] ?? 0), 2),
+                    'width' => round((float) ($tg['bounding_box']['width'] ?? 20), 2),
+                    'height' => round((float) ($tg['bounding_box']['height'] ?? 10), 2),
+                ],
+                'child_object_ids' => $tg['child_object_ids'] ?? [],
+                'direction' => $tg['direction'] ?? null,
+            ];
+        }
+
+        if (! empty($grps)) {
+            $this->currentTextObjects = [];
+            $this->currentTextGroups = $grps;
+        } else {
+            $this->currentTextObjects = $objs;
+            $this->currentTextGroups = [];
         }
     }
 
@@ -239,41 +341,138 @@ class EditPdfComponent extends BaseToolComponent
         $this->analyzeDocument($this->password);
     }
 
-    public function loadPagePreview(int $page): void
+    #[Computed]
+    public function allTextGroupsByPage(): array
     {
-        if (isset($this->pagePreviews[$page]) || ! $this->storedSourcePath) {
-            return;
+        $inspection = $this->getInspectionData();
+        if (! $inspection || empty($inspection['pages'])) {
+            return [];
         }
 
-        try {
-            $thumbService = app(PdfThumbnailService::class);
-            $preview = $thumbService->generatePagePreview($this->storedSourcePath, $page, 150);
-            if ($preview) {
-                $this->pagePreviews[$page] = $preview;
-            }
-        } catch (Throwable $e) {
-            Log::warning('EditPdfComponent: Could not generate page preview: '.$e->getMessage());
+        $res = [];
+        foreach ($inspection['pages'] as $p) {
+            $res[(int) ($p['page_index'] ?? 0)] = $p['text_groups'] ?? [];
         }
+
+        return $res;
     }
 
-    public function loadThumbnails(): void
+    #[Computed]
+    public function allTextObjectsByPage(): array
     {
-        if (! empty($this->pageThumbnails) || ! $this->storedSourcePath) {
-            return;
+        $inspection = $this->getInspectionData();
+        if (! $inspection || empty($inspection['pages'])) {
+            return [];
         }
 
-        try {
-            $thumbService = app(PdfThumbnailService::class);
-            $this->pageThumbnails = $thumbService->generateThumbnails($this->storedSourcePath, min(20, $this->pageCount), 150);
-        } catch (Throwable $e) {
-            Log::warning('EditPdfComponent: Thumbnail generation failed: '.$e->getMessage());
+        $res = [];
+        foreach ($inspection['pages'] as $p) {
+            $objs = [];
+            foreach ($p['text_objects'] ?? [] as $to) {
+                $to['object_id'] = $to['id'] ?? ($to['object_id'] ?? null);
+                $objs[] = $to;
+            }
+            $res[(int) ($p['page_index'] ?? 0)] = $objs;
         }
+
+        return $res;
+    }
+
+    #[Computed]
+    public function allPageDimensionsByPage(): array
+    {
+        $inspection = $this->getInspectionData();
+        if (! $inspection || empty($inspection['pages'])) {
+            return [];
+        }
+
+        $res = [];
+        foreach ($inspection['pages'] as $p) {
+            $res[(int) ($p['page_index'] ?? 0)] = [
+                'width' => (float) ($p['width'] ?? 595.28),
+                'height' => (float) ($p['height'] ?? 841.89),
+                'rotation' => (int) ($p['rotation'] ?? 0),
+            ];
+        }
+
+        return $res;
+    }
+
+    #[Computed]
+    public function pagePreviews(): array
+    {
+        if (! $this->upload) {
+            return [];
+        }
+
+        return [
+            $this->currentPage => $this->getPagePreviewUrl($this->currentPage, 150),
+        ];
+    }
+
+    #[Computed]
+    public function pageThumbnails(): array
+    {
+        if (! $this->upload) {
+            return [];
+        }
+
+        $res = [];
+        for ($i = 1; $i <= min(20, $this->pageCount); $i++) {
+            $res[$i] = $this->getThumbnailUrl($i, 50);
+        }
+
+        return $res;
+    }
+
+    /**
+     * Generate secure, signed temporary preview URL for an uploaded PDF page at 150 DPI.
+     */
+    public function getPagePreviewUrl(int $page, int $dpi = 150): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        $sessionId = (string) (session()->get('preview_session_id') ?: session()->getId());
+        session()->put('preview_session_id', $sessionId);
+
+        $filename = method_exists($this->upload, 'getFilename')
+            ? $this->upload->getFilename()
+            : basename($this->storedSourcePath ?? '');
+
+        if (! $filename) {
+            return '';
+        }
+
+        return URL::temporarySignedRoute(
+            'tools.pdf-preview',
+            now()->addHour(),
+            [
+                'filename' => $filename,
+                'page' => $page,
+                'dpi' => $dpi,
+                'session_id' => $sessionId,
+            ]
+        );
+    }
+
+    /**
+     * Generate low-res thumbnail URL for progressive preview.
+     */
+    public function getThumbnailUrl(int $page, int $dpi = 50): string
+    {
+        return $this->getPagePreviewUrl($page, $dpi);
     }
 
     public function goToPage(int $page): void
     {
         if ($page < 1 || $page > $this->pageCount) {
             return;
+        }
+
+        if ($this->hasUnsavedActiveEdit()) {
+            $this->saveCurrentEdit();
         }
 
         $this->currentPage = $page;
@@ -283,12 +482,7 @@ class EditPdfComponent extends BaseToolComponent
         $this->selectedObject = null;
         $this->editText = '';
 
-        $pIdx = $page - 1;
-        if (isset($this->allPageDimensionsByPage[$pIdx])) {
-            $this->pageDimensions = $this->allPageDimensionsByPage[$pIdx];
-        }
-
-        $this->loadPagePreview($page);
+        $this->loadPageTextData($page);
     }
 
     public function setZoom(int $zoom): void
@@ -318,8 +512,7 @@ class EditPdfComponent extends BaseToolComponent
             $this->saveCurrentEdit();
         }
 
-        $pIdx = $this->currentPage - 1;
-        $groups = $this->allTextGroupsByPage[$pIdx] ?? [];
+        $groups = !empty($this->currentTextGroups) ? $this->currentTextGroups : ($this->allTextGroupsByPage[$this->currentPage - 1] ?? []);
 
         foreach ($groups as $grp) {
             if ($grp['group_id'] === $groupId) {
@@ -360,10 +553,9 @@ class EditPdfComponent extends BaseToolComponent
             $this->saveCurrentEdit();
         }
 
-        $pIdx = $this->currentPage - 1;
+        $groups = !empty($this->currentTextGroups) ? $this->currentTextGroups : ($this->allTextGroupsByPage[$this->currentPage - 1] ?? []);
 
         // If called with a group_id directly
-        $groups = $this->allTextGroupsByPage[$pIdx] ?? [];
         foreach ($groups as $grp) {
             if ($grp['group_id'] === $objectId) {
                 $this->selectTextGroup($objectId);
@@ -373,7 +565,7 @@ class EditPdfComponent extends BaseToolComponent
         }
 
         // Direct object match
-        $objects = $this->allTextObjectsByPage[$pIdx] ?? [];
+        $objects = !empty($this->currentTextObjects) ? $this->currentTextObjects : ($this->allTextObjectsByPage[$this->currentPage - 1] ?? []);
         foreach ($objects as $obj) {
             if ($obj['object_id'] === $objectId) {
                 $this->selectedGroupId = null;
@@ -411,10 +603,9 @@ class EditPdfComponent extends BaseToolComponent
      */
     public function nextTextItem(): void
     {
-        $pIdx = $this->currentPage - 1;
-        $items = ! empty($this->allTextGroupsByPage[$pIdx])
-            ? $this->allTextGroupsByPage[$pIdx]
-            : ($this->allTextObjectsByPage[$pIdx] ?? []);
+        $items = ! empty($this->currentTextGroups)
+            ? $this->currentTextGroups
+            : $this->currentTextObjects;
 
         if (empty($items)) {
             if ($this->currentPage < $this->pageCount) {
@@ -457,10 +648,9 @@ class EditPdfComponent extends BaseToolComponent
      */
     public function prevTextItem(): void
     {
-        $pIdx = $this->currentPage - 1;
-        $items = ! empty($this->allTextGroupsByPage[$pIdx])
-            ? $this->allTextGroupsByPage[$pIdx]
-            : ($this->allTextObjectsByPage[$pIdx] ?? []);
+        $items = ! empty($this->currentTextGroups)
+            ? $this->currentTextGroups
+            : $this->currentTextObjects;
 
         if (empty($items)) {
             if ($this->currentPage > 1) {
@@ -494,10 +684,10 @@ class EditPdfComponent extends BaseToolComponent
             }
         } elseif ($this->currentPage > 1) {
             $this->goToPage($this->currentPage - 1);
-            $pIdxPrev = $this->currentPage - 1;
-            $prevItems = ! empty($this->allTextGroupsByPage[$pIdxPrev])
-                ? $this->allTextGroupsByPage[$pIdxPrev]
-                : ($this->allTextObjectsByPage[$pIdxPrev] ?? []);
+            $prevItems = ! empty($this->currentTextGroups)
+                ? $this->currentTextGroups
+                : $this->currentTextObjects;
+
             if (! empty($prevItems)) {
                 $lastItem = end($prevItems);
                 if (isset($lastItem['group_id'])) {
@@ -824,7 +1014,7 @@ class EditPdfComponent extends BaseToolComponent
         DailyFileQuotaService $quota
     ): void {
         if (! $this->storedSourcePath || ! file_exists($this->storedSourcePath)) {
-            $this->addError('upload', 'No valid PDF document uploaded.');
+            $this->addError('upload', __('ui.no_valid_pdf_document'));
 
             return;
         }
@@ -834,7 +1024,7 @@ class EditPdfComponent extends BaseToolComponent
         }
 
         if (empty($this->editManifest) && empty($this->addedTexts) && empty($this->addedShapes)) {
-            $this->addError('manifest', 'No modifications queued to apply.');
+            $this->addError('manifest', __('ui.no_modifications_queued'));
 
             return;
         }
@@ -876,7 +1066,7 @@ class EditPdfComponent extends BaseToolComponent
         try {
             $quota->assertAvailable();
             // Security Validation: Verify that every group_id or object_id belongs to the currently inspected document
-            $inspection = $pdfium->inspectDocument($this->storedSourcePath, $this->password ?: null);
+            $inspection = $this->getInspectionData() ?: $pdfium->inspectDocument($this->storedSourcePath, $this->password ?: null);
             $validObjectsMap = [];
             $validGroupsMap = [];
 
@@ -1121,10 +1311,13 @@ class EditPdfComponent extends BaseToolComponent
                 $quota->release($job);
                 $job->update([
                     'status' => JobStatus::FAILED,
-                    'error_message' => $e->getMessage(),
+                    'error_message' => __('ui.error_processing_generic'),
                 ]);
             }
-            $this->errorMessage = $e->getMessage();
+            $safeSecurityMessage = str_starts_with($e->getMessage(), 'Security violation: ')
+                ? $e->getMessage()
+                : null;
+            $this->errorMessage = $this->reportToolFailure($e, $safeSecurityMessage);
             $this->jobStatus = 'failed';
         } finally {
             $this->releaseLockSafely($lock);
@@ -1177,8 +1370,8 @@ class EditPdfComponent extends BaseToolComponent
             'storedSourcePath', 'jobId', 'pageCount', 'currentPage',
             'isScanned', 'isSigned', 'isEncrypted', 'passwordRequired',
             'password', 'passwordError', 'totalTextObjects', 'totalTextGroups',
-            'pageDimensions', 'allPageDimensionsByPage', 'pagePreviews', 'pageThumbnails',
-            'allTextObjectsByPage', 'allTextGroupsByPage',
+            'pageDimensions', 'currentTextObjects', 'currentTextGroups',
+            'pageNativeEditable', 'pageHasType3', 'pageWarnings',
             'selectedObjectId', 'selectedObject', 'selectedGroupId', 'selectedGroup',
             'editText', 'editFontSize', 'editColor', 'autoFit', 'editManifest', 'addedTexts', 'addedShapes', 'completedJob',
         ]);
@@ -1187,13 +1380,9 @@ class EditPdfComponent extends BaseToolComponent
 
     public function render()
     {
-        $pIdx = $this->currentPage - 1;
-        $currentTextObjects = $this->allTextObjectsByPage[$pIdx] ?? [];
-        $currentTextGroups = $this->allTextGroupsByPage[$pIdx] ?? [];
-
         return view('livewire.tools.edit-pdf-component', [
-            'currentTextObjects' => $currentTextObjects,
-            'currentTextGroups' => $currentTextGroups,
+            'currentTextObjects' => $this->currentTextObjects,
+            'currentTextGroups' => $this->currentTextGroups,
         ])->layout('layouts.app', [
             'title' => __('tools.edit_pdf.title').' — '.config('app.name'),
             'description' => __('tools.edit_pdf.desc'),

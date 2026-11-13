@@ -4,6 +4,8 @@ use App\Http\Controllers\FileDownloadController;
 use App\Http\Controllers\ClerkAuthController;
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\PublicShareDownloadController;
+use App\Http\Controllers\HeicPreviewController;
+use App\Http\Controllers\PdfPreviewController;
 use App\Livewire\Tools\ChangeImageBackgroundComponent;
 use App\Livewire\Tools\CompressImageComponent;
 use App\Livewire\Tools\CompressPdfComponent;
@@ -48,6 +50,9 @@ Route::get('/pdf-to-jpg', PdfToJpgComponent::class)->name('tools.pdf-to-jpg');
 Route::get('/pdf-to-png', PdfToPngComponent::class)->name('tools.pdf-to-png');
 Route::get('/jpg-to-pdf', JpgToPdfComponent::class)->name('tools.jpg-to-pdf');
 Route::get('/heic-to-pdf', HeicToPdfComponent::class)->name('tools.heic-to-pdf');
+Route::get('/tools/heic-preview', [HeicPreviewController::class, 'show'])->name('tools.heic-preview');
+Route::get('/tools/pdf-preview', [PdfPreviewController::class, 'show'])->name('tools.pdf-preview');
+Route::get('/tools/signature-preview', [PdfPreviewController::class, 'showSignature'])->name('tools.signature-preview');
 Route::get('/organize-pdf', OrganizePdfComponent::class)->name('tools.organize-pdf');
 Route::get('/protect-pdf', ProtectPdfComponent::class)->name('tools.protect-pdf');
 Route::get('/unlock-pdf', UnlockPdfComponent::class)->name('tools.unlock-pdf');
@@ -187,6 +192,7 @@ Route::get('/s/{token}/qr', [PublicShareDownloadController::class, 'qrCode'])
     ->name('share.qr');
 
 Route::post('/s/{token}/revoke', [PublicShareDownloadController::class, 'revoke'])
+    ->middleware('throttle:public-share-access')
     ->name('share.revoke');
 
 // Locale Switcher

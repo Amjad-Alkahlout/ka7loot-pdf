@@ -178,7 +178,7 @@ class FileStorageManager
         }
 
         $normalized = realpath(dirname($path));
-        if ($normalized === false || !str_starts_with($normalized, $root)) {
+        if ($normalized === false || ($normalized !== $root && ! str_starts_with($normalized, $root . DIRECTORY_SEPARATOR))) {
             throw new InvalidArgumentException("Security Exception: Path traversal attempt detected.");
         }
     }

@@ -26,11 +26,11 @@
             <div class="max-w-4xl mx-auto rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
                 <h3 class="text-lg font-bold text-slate-900 mb-4">{{ __('tools.change_background.result_ready') }}</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    @if($originalPreviewUri)
+                    @if($this->getPreviewUrl())
                         <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
                             <span class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">{{ __('tools.remove_background.preview_original') }}</span>
                             <div class="h-64 flex items-center justify-center overflow-hidden rounded-xl bg-slate-100">
-                                <img src="{{ $originalPreviewUri }}" alt="Original" class="max-h-full max-w-full object-contain">
+                                <img src="{{ $this->getPreviewUrl() }}" alt="Original" class="max-h-full max-w-full object-contain">
                             </div>
                         </div>
                     @endif
@@ -214,13 +214,24 @@
                                 <p class="text-xs text-slate-400 mt-1">{{ __('tools.change_background.upload_bg_hint') }}</p>
                             </div>
 
-                            @if($bgPreviewUri)
-                                <div class="flex items-center gap-4">
-                                    <div class="h-16 w-24 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center">
-                                        <img src="{{ $bgPreviewUri }}" alt="Background Preview" class="max-h-full max-w-full object-cover">
+                            @if($this->getBgPreviewUrl())
+                                <div class="p-3 bg-white rounded-xl border border-slate-200 space-y-3">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <div class="flex items-center gap-3 min-w-0">
+                                            <div class="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center">
+                                                <img src="{{ $this->getBgPreviewUrl() }}" alt="Background Preview" class="max-h-full max-w-full object-cover">
+                                            </div>
+                                            <div class="min-w-0">
+                                                <p class="text-xs font-semibold text-slate-800 truncate max-w-[180px]">{{ $bgFilename ?: ($bgUpload ? $bgUpload->getClientOriginalName() : '') }}</p>
+                                                <p class="text-[11px] text-slate-400">{{ $bgFileSizeFormatted }}</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" wire:click="clearBgUpload" class="text-xs font-semibold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer">
+                                            {{ __('ui.remove') }}
+                                        </button>
                                     </div>
-                                    <div>
-                                        <label class="block text-xs font-semibold text-slate-600 mb-1">{{ __('tools.change_background.bg_fit') }}</label>
+                                    <div class="pt-2 border-t border-slate-100">
+                                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ __('tools.change_background.bg_fit') }}</label>
                                         <div class="flex gap-2">
                                             <button type="button" wire:click="$set('bgFit', 'cover')"
                                                 class="px-3 py-1 text-xs rounded-lg font-medium border transition cursor-pointer {{ $bgFit === 'cover' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-700 border-slate-300' }}">
@@ -244,17 +255,61 @@
 
                 <!-- Preview and Tuning -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                    <!-- Image Card -->
-                    <div class="rounded-2xl border border-slate-200 p-4 bg-slate-50 text-center">
-                        <span class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{{ __('tools.remove_background.preview_original') }}</span>
-                        <div class="h-64 flex items-center justify-center overflow-hidden rounded-xl bg-white border border-slate-200">
-                            @if($originalPreviewUri)
-                                <img src="{{ $originalPreviewUri }}" alt="Preview" class="max-h-full max-w-full object-contain">
+                    <!-- Alpine-Powered Live Composition Preview Card -->
+                    <div x-data="{
+                             fgUrl: @js($this->getPreviewUrl()),
+                             bgUrl: @js($this->getBgPreviewUrl()),
+                             bgType: @entangle('backgroundType'),
+                             solidColor: @entangle('solidColor'),
+                             gradStart: @entangle('gradientStart'),
+                             gradEnd: @entangle('gradientEnd'),
+                             gradDir: @entangle('gradientDirection'),
+                             bgFit: @entangle('bgFit'),
+                             get gradientCss() {
+                                 const angle = this.gradDir === 'horizontal' ? 'to right' : (this.gradDir === 'diagonal' ? '135deg' : 'to bottom');
+                                 return `linear-gradient(${angle}, ${this.gradStart}, ${this.gradEnd})`;
+                             },
+                             get fitClass() {
+                                 if (this.bgFit === 'contain') return 'object-contain';
+                                 if (this.bgFit === 'stretch') return 'w-full h-full object-fill';
+                                 return 'object-cover';
+                             }
+                         }"
+                         class="rounded-2xl border border-slate-200 p-4 bg-slate-50 text-center">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">{{ __('tools.change_background.live_preview') }}</span>
+                            @if($imageWidth && $imageHeight)
+                                <span class="text-[11px] font-mono text-slate-400 bg-white px-2 py-0.5 rounded-md border border-slate-200">{{ $imageWidth }}×{{ $imageHeight }} px</span>
                             @endif
                         </div>
+
+                        <!-- Composite View Container with Dynamic Background -->
+                        <div class="h-64 sm:h-72 flex items-center justify-center overflow-hidden rounded-xl border border-slate-200 relative shadow-inner"
+                             :style="bgType === 'solid' ? { backgroundColor: solidColor } : (bgType === 'gradient' ? { background: gradientCss } : {})"
+                             :class="bgType === 'transparent' ? 'bg-[repeating-conic-gradient(#cbd5e1_0%_25%,#ffffff_0%_50%)] bg-[length:16px_16px]' : ''">
+                            
+                            <!-- Custom Image Background Layer -->
+                            <template x-if="bgType === 'image' && bgUrl">
+                                <img :src="bgUrl"
+                                     alt="Background Layer"
+                                     :class="fitClass"
+                                     class="absolute inset-0 w-full h-full pointer-events-none">
+                            </template>
+
+                            <!-- Foreground Subject Image Layer -->
+                            <template x-if="fgUrl">
+                                <img :src="fgUrl"
+                                     alt="{{ $upload->getClientOriginalName() }}"
+                                     class="max-h-full max-w-full object-contain relative z-10 transition-transform duration-200 hover:scale-105">
+                            </template>
+                        </div>
+
                         <div class="mt-3 flex justify-between items-center text-xs text-slate-500">
-                            <span class="truncate max-w-[200px]">{{ $upload->getClientOriginalName() }}</span>
-                            <button wire:click="resetWorkflow" class="text-rose-600 hover:text-rose-700 font-medium cursor-pointer">
+                            <div class="min-w-0 text-left">
+                                <p class="truncate max-w-[200px] font-medium text-slate-700" title="{{ $upload->getClientOriginalName() }}">{{ $upload->getClientOriginalName() }}</p>
+                                <p class="text-[11px] text-slate-400">{{ $fileSizeFormatted }}</p>
+                            </div>
+                            <button wire:click="resetWorkflow" type="button" class="text-rose-600 hover:text-rose-700 font-semibold cursor-pointer">
                                 {{ __('ui.cancel') }}
                             </button>
                         </div>
@@ -268,7 +323,7 @@
                                 <label for="change-tolerance" class="text-xs font-semibold text-slate-700">{{ __('tools.remove_background.tolerance') }}</label>
                                 <span class="text-xs font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{{ (int)$tolerance }}%</span>
                             </div>
-                            <input type="range" id="change-tolerance" wire:model.live="tolerance" min="5" max="80" step="1"
+                            <input type="range" id="change-tolerance" wire:model.live.debounce.150ms="tolerance" min="5" max="80" step="1"
                                 class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                         </div>
 
@@ -278,7 +333,7 @@
                                 <label for="change-feather" class="text-xs font-semibold text-slate-700">{{ __('tools.remove_background.feather') }}</label>
                                 <span class="text-xs font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{{ $feather }} px</span>
                             </div>
-                            <input type="range" id="change-feather" wire:model.live="feather" min="0" max="5" step="1"
+                            <input type="range" id="change-feather" wire:model.live.debounce.150ms="feather" min="0" max="5" step="1"
                                 class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                         </div>
 

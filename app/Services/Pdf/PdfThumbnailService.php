@@ -166,4 +166,186 @@ class PdfThumbnailService
 
         return null;
     }
+
+    /**
+     * Render a specific page of a PDF document directly to an output file on disk.
+     *
+     * @param string $sourcePath Path to the PDF file
+     * @param string $outputPath Absolute target file path to write JPEG image
+     * @param int $page 1-indexed page number
+     * @param int $dpiOrScale If <= 300, treated as DPI resolution. If > 300, treated as max pixel scale.
+     * @param int $quality JPEG quality (10-100, default: 85)
+     * @return bool True if successfully generated, false otherwise
+     */
+    public function renderPageToFile(
+        string $sourcePath,
+        string $outputPath,
+        int $page = 1,
+        int $dpiOrScale = 150,
+        int $quality = 85
+    ): bool {
+        $sourcePath = realpath($sourcePath) ?: str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $sourcePath);
+        $outputPath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $outputPath);
+
+        if (!file_exists($sourcePath) || !$this->detector->hasPoppler()) {
+            return false;
+        }
+
+        $outputDir = dirname($outputPath);
+        if (!is_dir($outputDir) && !mkdir($outputDir, 0755, true) && !is_dir($outputDir)) {
+            return false;
+        }
+
+        $tmpDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'pdf_rend_' . uniqid('', true);
+        if (!is_dir($tmpDir) && !mkdir($tmpDir, 0777, true)) {
+            return false;
+        }
+
+        try {
+            $popplerPath = $this->detector->getPopplerPath();
+            $prefix = $tmpDir . DIRECTORY_SEPARATOR . 'page';
+            $quality = max(10, min(100, $quality));
+
+            $popplerInputPath = $sourcePath;
+            if (strlen($sourcePath) > 180 || str_contains($sourcePath, '-meta')) {
+                $shortCopy = $tmpDir . DIRECTORY_SEPARATOR . 'src_' . uniqid() . '.pdf';
+                if (@copy($sourcePath, $shortCopy)) {
+                    $popplerInputPath = $shortCopy;
+                }
+            }
+
+            if ($dpiOrScale <= 300) {
+                $dpi = max(50, $dpiOrScale);
+                $cmd = [
+                    $popplerPath,
+                    '-jpeg',
+                    '-jpegopt',
+                    "quality={$quality}",
+                    '-r',
+                    (string) $dpi,
+                    '-f',
+                    (string) $page,
+                    '-l',
+                    (string) $page,
+                    $popplerInputPath,
+                    $prefix,
+                ];
+            } else {
+                $scale = max(200, min(2400, $dpiOrScale));
+                $cmd = [
+                    $popplerPath,
+                    '-jpeg',
+                    '-jpegopt',
+                    "quality={$quality}",
+                    '-scale-to',
+                    (string) $scale,
+                    '-f',
+                    (string) $page,
+                    '-l',
+                    (string) $page,
+                    $popplerInputPath,
+                    $prefix,
+                ];
+            }
+
+            $this->executor->execute($cmd);
+
+            $files = glob($tmpDir . DIRECTORY_SEPARATOR . 'page-*.jpg') ?: [];
+            if (!empty($files) && file_exists($files[0]) && filesize($files[0]) > 0) {
+                if (file_exists($outputPath)) {
+                    @unlink($outputPath);
+                }
+                return copy($files[0], $outputPath);
+            }
+
+            return false;
+        } catch (Throwable $e) {
+            Log::warning("PdfThumbnailService: renderPageToFile failed for page {$page}: " . $e->getMessage());
+            return false;
+        } finally {
+            $remaining = glob($tmpDir . DIRECTORY_SEPARATOR . '*');
+            if ($remaining) {
+                foreach ($remaining as $f) {
+                    if (is_file($f)) {
+                        @unlink($f);
+                    }
+                }
+            }
+            @rmdir($tmpDir);
+        }
+    }
+
+    /**
+     * Get the dedicated cache directory for a given PDF source file path or identifier.
+     *
+     * @param string $sourcePath
+     * @return string
+     */
+    public function getPreviewCacheDirectory(string $sourcePath): string
+    {
+        $normalizedPath = @realpath($sourcePath) ?: $sourcePath;
+        $sourceKey = md5($normalizedPath);
+        return storage_path('app' . DIRECTORY_SEPARATOR . 'pdf-preview-cache' . DIRECTORY_SEPARATOR . $sourceKey);
+    }
+
+    /**
+     * Get the deterministic cached preview file path for a specific page, resolution, quality, and document content.
+     * Uses full SHA-256 hash of the document content to guarantee detection of any byte-level modifications.
+     *
+     * @param string $sourcePath
+     * @param int $page
+     * @param int $dpiOrScale
+     * @param int $quality
+     * @return string
+     */
+    public function getCachedPreviewPath(
+        string $sourcePath,
+        int $page = 1,
+        int $dpiOrScale = 150,
+        int $quality = 85,
+        ?string $contentHash = null
+    ): string {
+        $dir = $this->getPreviewCacheDirectory($sourcePath);
+        $contentKey = '0';
+
+        if ($contentHash !== null) {
+            $contentKey = $contentHash === '0' ? '0' : substr($contentHash, 0, 32);
+        } elseif (file_exists($sourcePath)) {
+            $sha256 = @hash_file('sha256', $sourcePath);
+            $contentKey = $sha256 ? substr($sha256, 0, 32) : '0';
+        }
+
+        return $dir . DIRECTORY_SEPARATOR . "p{$page}_d{$dpiOrScale}_q{$quality}_{$contentKey}.jpg";
+    }
+
+    /**
+     * Delete all cached preview files for a given PDF file.
+     *
+     * @param string $sourcePath Path to the PDF file or identifier
+     */
+    public function deleteThumbnailsForPdf(string $sourcePath): void
+    {
+        $dir = $this->getPreviewCacheDirectory($sourcePath);
+        $this->deleteDirectoryRecursively($dir);
+    }
+
+    /**
+     * Recursively delete a directory and its contents.
+     */
+    protected function deleteDirectoryRecursively(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+
+        $files = glob($dir . DIRECTORY_SEPARATOR . '*') ?: [];
+        foreach ($files as $file) {
+            if (is_file($file)) {
+                @unlink($file);
+            } elseif (is_dir($file)) {
+                $this->deleteDirectoryRecursively($file);
+            }
+        }
+        @rmdir($dir);
+    }
 }

@@ -95,8 +95,13 @@
                     </div>
                 </div>
 
-                <!-- Page Management Grid -->
-                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                <!-- Page Management Grid with Drag-and-Drop & Progressive Preview -->
+                <div class="mb-2">
+                    <p class="text-xs text-slate-500">{{ __('tools.organize_pdf.drag_hint') }}</p>
+                </div>
+                <div x-sortable="$wire.reorderPages($items)"
+                     data-sortable-handle=".drag-handle"
+                     class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     @foreach($pages as $index => $page)
                         @php
                             $isDeleted = $page['deleted'];
@@ -106,15 +111,23 @@
                         @endphp
 
                         <div wire:key="page-card-{{ $page['id'] }}"
+                             data-id="{{ $page['id'] }}"
+                             x-data="pdfProgressivePreview({
+                                 url: '{{ $this->getPreviewUrl($origPage, 120) }}',
+                                 highResUrl: '{{ $this->getHighResPreviewUrl($origPage) }}',
+                                 page: {{ $origPage }},
+                                 refreshUrl: () => $wire.getPreviewUrl({{ $origPage }}, 120),
+                                 refreshHighResUrl: () => $wire.getHighResPreviewUrl({{ $origPage }})
+                             })"
                              wire:click="selectPage({{ $page['id'] }})"
                              class="group relative flex flex-col justify-between rounded-2xl border transition-all duration-200 bg-white p-3 shadow-xs
                                     {{ $isSelected ? 'border-indigo-500 ring-2 ring-indigo-500/20' : 'border-slate-200 hover:border-slate-300 hover:shadow-sm' }}
                                     {{ $isDeleted ? 'opacity-40 grayscale bg-slate-50/80 border-dashed' : '' }}">
 
-                            <!-- Header Bar: Order # & Original Page -->
+                            <!-- Header Bar: Order # & Original Page & Inspection -->
                             <div class="flex items-center justify-between gap-1 mb-2 text-xs">
                                 <div class="flex items-center gap-1.5">
-                                    <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white shadow-xs">
+                                    <span class="drag-handle inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-bold text-white shadow-xs cursor-grab active:cursor-grabbing hover:bg-indigo-600 transition" title="{{ __('tools.organize_pdf.drag_hint') }}">
                                         {{ $index + 1 }}
                                     </span>
                                     <span class="font-medium text-slate-600">
@@ -122,33 +135,72 @@
                                     </span>
                                 </div>
 
-                                @if($isDeleted)
-                                    <span class="inline-flex items-center rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
-                                        {{ __('tools.organize_pdf.page_deleted') }}
-                                    </span>
-                                @elseif($rotation > 0)
-                                    <span class="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
-                                        ↻ {{ $rotation }}°
-                                    </span>
-                                @endif
+                                <div class="flex items-center gap-1">
+                                    @if($isDeleted)
+                                        <span class="inline-flex items-center rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+                                            {{ __('tools.organize_pdf.page_deleted') }}
+                                        </span>
+                                    @elseif($rotation > 0)
+                                        <span class="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                                            ↻ {{ $rotation }}°
+                                        </span>
+                                    @endif
+
+                                    <button @click.stop="openInspect()"
+                                            type="button"
+                                            title="{{ __('tools.organize_pdf.inspect_page') }}"
+                                            class="opacity-0 group-hover:opacity-100 transition p-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-slate-100 cursor-pointer">
+                                        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
 
-                            <!-- Thumbnail Viewport with CSS Live Rotation -->
+                            <!-- Thumbnail Viewport with CSS Live Rotation & Progressive Preview -->
                             <div class="relative w-full aspect-[3/4] bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center border border-slate-200/60 p-2">
-                                @if(isset($thumbnails[$origPage]))
-                                    <img src="{{ $thumbnails[$origPage] }}"
-                                         alt="Page {{ $origPage }}"
-                                         class="max-w-full max-h-full object-contain drop-shadow-sm transition-transform duration-300 ease-in-out"
-                                         style="transform: rotate({{ $rotation }}deg);"
-                                         loading="lazy" />
-                                @else
+                                <!-- Skeleton while loading -->
+                                <template x-if="loading && !loaded">
+                                    <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 animate-pulse p-4">
+                                        <div class="h-7 w-7 rounded-lg bg-indigo-100/80 text-indigo-600 flex items-center justify-center mb-1.5">
+                                            <svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                            </svg>
+                                        </div>
+                                        <div class="h-1.5 w-10 bg-slate-200 rounded"></div>
+                                    </div>
+                                </template>
+
+                                <!-- Error State with Retry Button -->
+                                <template x-if="error">
+                                    <div class="absolute inset-0 flex flex-col items-center justify-center bg-rose-50/60 p-2 text-center">
+                                        <svg class="h-5 w-5 text-rose-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                        <button @click.stop="retry()" type="button" class="text-[10px] font-bold text-indigo-600 hover:underline">
+                                            {{ __('tools.organize_pdf.retry') }}
+                                        </button>
+                                    </div>
+                                </template>
+
+                                <!-- Placeholder Mockup before observer intersection -->
+                                <template x-if="!loaded && !loading && !error">
                                     <div class="text-center p-3 transition-transform duration-300" style="transform: rotate({{ $rotation }}deg);">
                                         <svg class="h-8 w-8 mx-auto text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                         </svg>
                                         <span class="text-[11px] font-bold text-slate-500 mt-1 block">{{ __('tools.organize_pdf.page_label') }} {{ $origPage }}</span>
                                     </div>
-                                @endif
+                                </template>
+
+                                <!-- Rendered Crisp Thumbnail Image with Live Rotation -->
+                                <template x-if="loaded">
+                                    <img :src="url"
+                                         alt="Page {{ $origPage }}"
+                                         class="max-w-full max-h-full object-contain drop-shadow-sm transition-transform duration-300 ease-in-out"
+                                         style="transform: rotate({{ $rotation }}deg);" />
+                                </template>
 
                                 @if($isDeleted)
                                     <div class="absolute inset-0 bg-slate-900/20 backdrop-blur-[1px] flex items-center justify-center">
@@ -160,6 +212,7 @@
                                     </div>
                                 @endif
                             </div>
+
 
                             <!-- Per-Page Action Toolbar -->
                             <div class="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between gap-1">
@@ -260,4 +313,76 @@
             </div>
         @endif
     @endif
+
+    <!-- High-Resolution Document Page Inspection Modal -->
+    <div x-data="pdfInspectModal()"
+         x-cloak
+         x-show="isOpen"
+         @keydown.escape.window="close()"
+         class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
+        <div @click.away="close()"
+             class="relative max-w-4xl w-full bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/90">
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700 font-bold text-sm">
+                        <span x-text="page"></span>
+                    </span>
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-sm">
+                            {{ __('tools.organize_pdf.page_label') }} <span x-text="page"></span>
+                        </h3>
+                        <span class="text-xs text-slate-500">{{ __('tools.organize_pdf.high_res_inspection') }}</span>
+                    </div>
+                </div>
+
+                <!-- Zoom Controls & Close Button -->
+                <div class="flex items-center gap-2">
+                    <button @click="zoomOut()"
+                            type="button"
+                            title="{{ __('tools.organize_pdf.zoom_out') }}"
+                            class="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-100 font-bold text-base cursor-pointer">
+                        -
+                    </button>
+                    <span class="text-xs font-semibold text-slate-600 w-12 text-center" x-text="Math.round(zoom * 100) + '%'"></span>
+                    <button @click="zoomIn()"
+                            type="button"
+                            title="{{ __('tools.organize_pdf.zoom_in') }}"
+                            class="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-100 font-bold text-base cursor-pointer">
+                        +
+                    </button>
+                    <button @click="resetZoom()"
+                            type="button"
+                            class="px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer">
+                        100%
+                    </button>
+                    <button @click="close()"
+                            type="button"
+                            title="{{ __('tools.organize_pdf.close_preview') }}"
+                            class="ml-2 h-8 w-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer font-bold">
+                        &times;
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body (Preview Canvas) -->
+            <div class="p-6 overflow-auto flex-1 flex items-center justify-center bg-slate-100/60 min-h-[350px]">
+                <template x-if="!imageLoaded">
+                    <div class="flex flex-col items-center gap-2 text-slate-400">
+                        <svg class="h-8 w-8 animate-spin text-indigo-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                        <span class="text-xs font-medium">{{ __('tools.organize_pdf.preview_loading') }}</span>
+                    </div>
+                </template>
+                <img x-show="imageLoaded"
+                     :src="url"
+                     :style="`transform: scale(${zoom}); transform-origin: center center;`"
+                     class="max-w-full max-h-[70vh] object-contain shadow-lg rounded transition-transform duration-150"
+                     alt="Inspection Preview">
+            </div>
+        </div>
+    </div>
 </div>
+

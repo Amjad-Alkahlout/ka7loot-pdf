@@ -68,25 +68,41 @@
             </div>
         @else
             <div class="max-w-2xl mx-auto space-y-6">
-                <!-- File Pill -->
-                <div class="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-                    <div class="flex items-center gap-3 min-w-0">
-                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                <!-- Encrypted Document Card -->
+                <div class="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs">
+                    <div class="flex flex-col sm:flex-row items-center gap-5">
+                        <div class="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-amber-50 border border-amber-200/60 text-amber-600 flex items-center justify-center shrink-0 shadow-2xs">
+                            <svg class="h-8 w-8 sm:h-10 sm:w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                             </svg>
                         </div>
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                                <h4 class="truncate font-semibold text-slate-800 text-sm">{{ $upload->getClientOriginalName() }}</h4>
-                                <span class="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                                    {{ __('ui.state_uploaded') }}
-                                </span>
+                        <div class="flex-1 min-w-0 space-y-2 w-full text-center sm:text-start">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <h4 class="truncate font-bold text-slate-900 text-sm sm:text-base" title="{{ $upload->getClientOriginalName() }}">
+                                        {{ $upload->getClientOriginalName() }}
+                                    </h4>
+                                    <div class="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-1">
+                                        <span class="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                                            {{ __('ui.state_uploaded') }}
+                                        </span>
+                                        <span class="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-xs font-bold text-amber-700">
+                                            {{ __('tools.protect_pdf.title') }}
+                                        </span>
+                                        <span class="text-xs text-slate-400">
+                                            {{ $fileSizeFormatted ?: number_format($upload->getSize() / 1024, 1) . ' KB' }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button wire:click="cancelToolUpload" class="text-xs font-semibold text-rose-600 hover:underline cursor-pointer shrink-0">
+                                    {{ __('ui.clear_all') }}
+                                </button>
                             </div>
-                            <p class="text-xs text-slate-400">{{ number_format($upload->getSize() / 1024, 1) }} KB</p>
+                            <p class="text-xs text-slate-500 leading-relaxed">
+                                {{ __('tools.unlock_pdf.desc') }}
+                            </p>
                         </div>
                     </div>
-                    <button wire:click="cancelToolUpload" class="text-xs font-semibold text-rose-600 hover:underline cursor-pointer">{{ __('ui.clear_all') }}</button>
                 </div>
 
                 <!-- Password Removal Card -->

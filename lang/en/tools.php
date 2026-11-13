@@ -14,6 +14,10 @@ return array (
     'action' => 'Merge PDFs',
     'drop_zone' => 'Click or drag PDF files here to upload',
     'files_selected' => ':count file(s) selected',
+    'reorder_hint' => 'Drag or use arrows to rearrange the order of documents in the merged PDF',
+    'inspect_file' => 'Inspect PDF',
+    'pages_count' => ':count pages',
+    'file_badge' => 'PDF :num',
     'move_up' => 'Move Up',
     'move_down' => 'Move Down',
     'remove' => 'Remove',
@@ -88,7 +92,15 @@ return array (
     'error_duplicate_pages' => 'Duplicate page reference detected: page :pages.',
     'error_empty_range' => 'Please enter at least one valid page range.',
     'error_every_n_invalid' => 'Please enter a valid page number between 1 and :max.',
+    'inspect_page' => 'Inspect Page',
+    'high_res_inspection' => 'High-Resolution Inspection',
+    'zoom_in' => 'Zoom In',
+    'zoom_out' => 'Zoom Out',
+    'close_preview' => 'Close',
+    'retry' => 'Retry',
+    'preview_loading' => 'Loading page preview...',
   ),
+
   'organize_pdf' => 
   array (
     'title' => 'Organize & Rotate PDF',
@@ -108,7 +120,16 @@ return array (
     'pages_retained' => ':count page(s) retained',
     'error_no_pages' => 'At least one page must be included in the document.',
     'reset_all' => 'Reset All Changes',
+    'drag_hint' => 'Drag pages to reorder or use the arrow buttons',
+    'inspect_page' => 'Inspect Page',
+    'high_res_inspection' => 'High-Resolution Inspection',
+    'zoom_in' => 'Zoom In',
+    'zoom_out' => 'Zoom Out',
+    'close_preview' => 'Close',
+    'retry' => 'Retry',
+    'preview_loading' => 'Loading page preview...',
   ),
+
   'jpg_to_pdf' => 
   array (
     'title' => 'JPG to PDF',
@@ -132,7 +153,7 @@ return array (
     'title' => 'HEIC to PDF',
     'desc' => 'Convert iPhone and iPad HEIC/HEIF photos into high-quality PDF documents with custom order, page sizes, and margins.',
     'action' => 'Convert HEIC to PDF',
-    'reorder_hint' => 'Use the arrows to arrange PDF pages in your preferred order.',
+    'reorder_hint' => 'Drag or use arrows to arrange PDF pages in your preferred order.',
     'page_size' => 'Page Size',
     'orientation' => 'Orientation',
     'margin' => 'Margin',
@@ -186,6 +207,7 @@ return array (
     'priority_balanced' => 'Balanced Quality & Size',
     'priority_smallest' => 'Aggressive Size Reduction',
     'estimated_savings' => 'Estimated Size Reduction',
+    'preview_original' => 'Original Image',
   ),
   'resize_image' => 
   array (
@@ -202,6 +224,8 @@ return array (
     'height' => 'Height (px)',
     'percentage' => 'Percentage (%)',
     'maintain_ratio' => 'Maintain Aspect Ratio',
+    'original_dimensions' => 'Original Dimensions',
+    'preview_original' => 'Original Image',
   ),
   'convert_image' =>
   array (
@@ -211,6 +235,9 @@ return array (
     'target_format' => 'Target Format',
     'engine' => 'GD image processing with HEIC support',
     'heic_note' => 'HEIC and HEIF images are decoded securely before conversion. JPG is recommended for the best result.',
+    'preview_original' => 'Original Image',
+    'heic_badge' => 'HEIC / HEIF',
+    'heic_preview_notice' => 'Native preview unavailable for HEIC in this browser. Conversion will be processed securely on the server.',
   ),
   'protect_pdf' => 
   array (
