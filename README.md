@@ -1,110 +1,113 @@
-# Ka7loot PDF - Production-Grade PDF & Image Processing Platform
+# Ka7loot PDF
 
-**Ka7loot PDF** is a modern, privacy-focused online utility platform built with **Laravel 13**, **PHP 8.5.5**, **MySQL 8.4**, **Livewire 3**, **Vite 7**, and **Tailwind CSS 4**.
+Ka7loot PDF is a bilingual web app for working with PDF and image files. It is built with Laravel, Livewire, and Vite. Files are processed in temporary, per-job storage and are automatically removed after their retention period.
 
-Created & maintained by **Amjad Alkahloot** (Software Developer)  
-GitHub: [https://github.com/Amjad-Alkahlout](https://github.com/Amjad-Alkahlout)  
+Created and maintained by **Amjad Alkahloot**.
+
+GitHub: [Amjad Alkahloot](https://github.com/Amjad-Alkahlout)
+
 Contact: [akahloot2005@gmail.com](mailto:akahloot2005@gmail.com)
 
----
+## Features
 
-## Key Features
+### PDF tools
 
-1. **Pure-PHP Document & Image Clustering**:
-   - **PDF Merge**: Combines multiple PDF files into one while preserving per-page orientations, dimensions, and metadata.
-   - **PDF Split**: Extract specific page ranges (e.g. `1-3, 5, 8-10`) or extract all pages as separate PDFs into a unified ZIP archive.
-   - **Organize & Rotate PDF**: Arbitrary page reordering, selective deletion, and native 90°/180°/270° orientation rotation (`RotatableFpdi`).
-   - **JPG to PDF**: Converts collections of JPG, PNG, and WebP images into PDFs with customizable page sizes (`A4`, `Letter`, `Legal`, `Fit to Image`), orientations, and margins.
-   - **Image Compression & Optimization**: High-speed lossy and lossless compression for JPG, PNG, and WebP using Intervention Image v3 GD driver.
-   - **Image Resizing & Conversion**: Pixels-based image resizing (`Contain`, `Cover`, `Fill`) and format conversion across JPG, PNG, WebP, GIF, BMP, HEIC, and HEIF. HEIC/HEIF files are decoded with the bundled Node.js/WASM worker before conversion.
-   - **Daily Processing Quotas**: Guests can process 20 files per application day; Google-authenticated users can process 50. This is separate from the 50-file batch limit.
-   - **Clerk Authentication**: Optional authentication supports email/password with email verification. Google sign-in can be enabled as a Clerk social connection.
+- Merge PDFs, split by page ranges, and organize pages by reordering, rotating, or deleting them.
+- Compress PDFs. Ghostscript enables deeper compression; a PHP-based optimization path is available without it.
+- Convert PDF pages to JPG or PNG with Poppler (`pdftoppm`).
+- Convert JPG, PNG, and WebP images to PDF, and convert HEIC/HEIF images to PDF.
+- Sign PDFs and edit them with text, images, and page-level changes.
+- Preview PDF pages progressively in the browser before processing.
+- Process multiple files in supported tools, with per-file status and progress feedback.
 
-2. **Dual-Engine PDF Compression Transparency**:
-   - **Deep Compression (Ghostscript)**: Employs Ghostscript (`gs`) stream downsampling, font subsetting, and flate recompression when available on the host environment.
-   - **Limited Optimization (Pure PHP)**: When Ghostscript is not installed, performs structural PDF stream cleanup and object repack via `RotatableFpdi`. Clearly labeled in the UI as *"Limited optimization (Pure PHP)"* with an informative notice indicating Ghostscript is required for deep compression.
+### Image tools
 
-3. **Subprocess Security & Execution Isolation**:
-   - External CLI commands (`gs`, `pdftoppm`) are executed through [`SubprocessExecutorService`](file:///C:/Users/pdx/Desktop/PDF%20Project/app/Services/System/SubprocessExecutorService.php) using argument arrays to eliminate shell injection vulnerabilities, with strict timeouts and error sanitization.
+- Compress, resize, and convert images. Supported formats include JPG, PNG, WebP, GIF, BMP, HEIC, and HEIF where the selected operation supports them.
+- Remove an image background or replace it with a color or image. Background removal uses a configurable processing engine.
 
-4. **Ephemeral Storage & Strict Data Governance**:
-   - Every file operation takes place in an isolated per-job directory: `storage/app/secure_temp/{job_uuid}/`.
-   - File uploads are validated via magic-byte inspection (`finfo_file`), stripping path traversal characters.
-   - Anonymized telemetry (`tool_usage`) uses SHA-256 IP hashes with zero storage of raw client IP addresses.
-   - Automated cleanup scheduler (`php artisan app:cleanup-expired`) purges expired directories every 15 minutes.
-   - "Delete Now" button allows users to immediately and irreversibly delete their files from the disk on demand.
+### Accounts, privacy, and localization
 
-5. **Authoritative Status & Idempotent Asynchronous Processing**:
-   - UI reflects authentic database `FileJob::$status` transitions (`pending` $\rightarrow$ `processing` $\rightarrow$ `completed` / `failed`).
-   - Indeterminate progress indicators avoid false progress estimates.
-   - Server-anchored countdown timer computes expiration directly against database `expires_at` UTC timestamps.
-   - Atomic cache locking (`Cache::lock`) blocks duplicate concurrent workers from running the same job.
-   - Retries cleanly purge prior outputs and update `processed_files` and `tool_usage` in-place without duplicate records.
+- English and Arabic interfaces, including right-to-left layout support.
+- Clerk-based sign-in and account management, with optional Google sign-in configured through Clerk.
+- Default daily processing quotas are 20 files for guests and 50 for signed-in users. The separate default batch limit is 50 files.
+- Temporary per-job file storage, expiring download links, immediate deletion, and temporary share links with QR codes.
+- Anonymous tool-usage records store hashed IP addresses rather than raw client IPs.
 
-6. **Bilingual RTL Support (English & Arabic)**:
-   - Dynamic direction switching (`dir="ltr"` and `dir="rtl"`).
-   - Tailored Arabic typography with Cairo font support.
+## Technology
 
----
+- PHP 8.3 or later and Laravel 13
+- Livewire 3
+- Node.js and npm; Vite 7 and Tailwind CSS 4
+- SQLite for the default local setup, or MySQL with `pdo_mysql`
+- PHP extensions: GD, Fileinfo, Intl, Zip, and the PDO driver for the configured database
+- Optional system tools: Ghostscript for deeper PDF compression and Poppler for PDF-to-image conversion
 
-## Technical Stack
+Install dependencies from the lock files with Composer and npm to get the project’s exact package versions.
 
-- **Framework**: Laravel 13 (`v13.31.0`)
-- **Runtime**: PHP 8.5.5 (Extensions: `gd`, `exif`, `intl`, `zip`, `pdo_mysql`, `fileinfo`)
-- **Database**: MySQL 8.4
-- **Reactivity**: Livewire 3 (`v3.8.8`)
-- **Styling**: Tailwind CSS 4 (`v4.3.3`) with `@tailwindcss/vite`
-- **Frontend Bundler**: Vite 7 (`v7.3.6`)
+## Local setup
 
----
+### Requirements
 
-## Prerequisites & Installation
+Install PHP 8.3+, Composer, Node.js (20+ recommended), and npm. Enable the PHP extensions listed above. The repository's `.env.example` uses SQLite by default; MySQL can be configured instead.
 
-### 1. Host Requirements
-- PHP 8.5.5+ with GD, Exif, Intl, Fileinfo, and Zip extensions enabled in `php.ini`. Set `max_file_uploads = 50` so PHP accepts the application's 50-file batch limit.
-- MySQL 8.4+ database server.
-- Node.js 20+ & npm. Node.js is required for HEIC/HEIF image conversion and HEIC-to-PDF processing.
-- *(Optional for Deep PDF Compression)* Ghostscript (`gs` / `gswin64c.exe`):
-  ```powershell
-  choco install ghostscript -y
-  ```
-- *(Optional for PDF-to-Image)* Poppler (`pdftoppm`):
-  ```powershell
-  choco install poppler -y
-  ```
+Install optional tools if you need their capabilities:
 
-### 2. Setup Application
+```powershell
+# Windows with Chocolatey
+choco install ghostscript poppler -y
+```
+
+On Debian or Ubuntu, install `ghostscript` and `poppler-utils` with the system package manager. If a binary is not on `PATH`, set `FP_GHOSTSCRIPT_PATH` or `FP_POPPLER_PATH` in `.env` to its executable path.
+
+### Install and run
+
 ```bash
-# Clone repository
-git clone <repo-url> pdf-project
-cd pdf-project
-
-# Install composer packages
+git clone https://github.com/Amjad-Alkahlout/ka7loot-pdf.git
+cd ka7loot-pdf
 composer install
-
-# Install npm packages & compile assets
 npm install
-npm run build
-
-# Configure environment
 cp .env.example .env
 php artisan key:generate
+php artisan migrate
+npm run build
+```
 
-# Run database migrations
+For local development, run the application, queue worker, and Vite in separate terminals:
+
+```bash
+php artisan serve
+php artisan queue:work
+npm run dev
+```
+
+For a single-command development environment, the Composer `dev` script starts Laravel, the queue listener, logs, and Vite together:
+
+```bash
+composer run dev
+```
+
+If you stop Vite and want to use the built assets, remove the stale `public/hot` file before running the app:
+
+```powershell
+Remove-Item public/hot -ErrorAction SilentlyContinue
+```
+
+## Configuration
+
+### Database and queue
+
+The example environment is configured for SQLite, a database-backed queue, sessions, and cache. Create the SQLite database file if it does not exist, then run migrations:
+
+```powershell
+New-Item -ItemType File -Path database/database.sqlite -Force
 php artisan migrate
 ```
 
-### 3. Check System Binaries & Capabilities
-Verify host capabilities and external binary discovery:
-```bash
-php artisan app:check-system-binaries
-```
+For MySQL, configure `DB_CONNECTION`, host, database, username, and password in `.env`, and ensure `pdo_mysql` is enabled. Keep a queue worker running in production to process queued jobs.
 
-### 4. Configure Clerk Authentication and Daily Quotas
+### Clerk authentication
 
-The application uses Clerk for account creation, email/password authentication, email verification, and optional Google sign-in. Google credentials are configured only in Clerk; this Laravel application does not implement Google OAuth directly.
-
-Set the following deployment variables without committing secret values:
+Clerk is used for authentication. Set these deployment values in `.env`; do not commit secret keys:
 
 ```dotenv
 CLERK_PUBLISHABLE_KEY=pk_test_...
@@ -115,83 +118,64 @@ CLERK_SECRET_KEY=sk_test_...
 CLERK_API_URL=https://api.clerk.com/v1
 ```
 
-In the Clerk Dashboard:
+In the Clerk Dashboard, enable the sign-in methods you intend to offer, configure email verification as needed, and add the local and production application origins. Google sign-in is configured as a Clerk social connection; this app does not implement Google OAuth directly.
 
-1. Enable email/password sign-up and require email verification.
-2. Add the local origins (`http://localhost:8000` and, if used, `http://127.0.0.1:8000`) and production origin under allowed domains/origins.
-3. Optionally enable Google under **Social connections**. Google OAuth credentials and consent settings belong in Clerk.
-4. Configure the Clerk session token issuer and public JWT key used by the Laravel server.
+The existing Vite entry point initializes Clerk and reads `CLERK_PUBLISHABLE_KEY` from the Laravel layout. Do not add a second Clerk bootstrap or a separate `VITE_CLERK_PUBLISHABLE_KEY`. If you add a Content Security Policy, allow the Clerk Frontend API domain in `script-src` and Clerk endpoints in `connect-src`.
 
-The dashboard's JavaScript/Vite setup guide is for a new standalone Vite app. Do not
-run `npm create vite` or add a second Clerk bootstrap in this Laravel application:
-the existing `resources/js/app.js` already initializes Clerk and the Blade layout
-passes the publishable key to it. Copy the publishable key from Clerk into
-`CLERK_PUBLISHABLE_KEY`; it is intentionally not required as a separate
-`VITE_CLERK_PUBLISHABLE_KEY` variable.
+Laravel verifies Clerk session tokens server-side and maps users to the local `users.clerk_id`. The app stores the Clerk ID and basic verified profile fields, not passwords or provider tokens. After changing environment values, clear or rebuild the configuration cache:
 
-The application also loads Clerk's hosted UI bundle from the Frontend API domain
-encoded in the publishable key before calling `openSignIn` or `openSignUp`.
-Allow that domain in browser security policies if you add a Content Security
-Policy; `script-src` must allow the Clerk Frontend API domain and `connect-src`
-must allow the Clerk API endpoints.
-
-Laravel verifies the Clerk session token server-side on each web and Livewire request, then maps the verified Clerk user ID to the local `users.clerk_id` column. Only the stable Clerk ID, verified email, display name, and verification timestamp are stored locally. Passwords and provider tokens are never stored. After changing environment values, run `php artisan config:clear` and `php artisan config:cache`.
-
-Daily limits are configurable with `FP_DAILY_GUEST_FILES` (default `20`) and `FP_DAILY_AUTH_FILES` (default `50`). They apply across all processing tools. The existing `FP_MAX_BATCH_FILES=50` setting remains the per-request batch limit.
-
----
-
-## Running the Platform
-
-### Local Development
-For the simplest local run after `npm run build`, remove any stale Vite hot
-file and run Laravel plus the queue worker:
-```powershell
-Remove-Item public/hot -ErrorAction SilentlyContinue
-php artisan serve
-php artisan queue:work
-```
-
-When actively changing JavaScript or CSS, use Vite instead of the built assets:
 ```bash
-# Terminal 1: Laravel server
-php artisan serve
-
-# Terminal 2: Queue worker
-php artisan queue:work
-
-# Terminal 3: Vite dev server
-npm run dev
+php artisan config:clear
+# Production only, after configuring the environment:
+php artisan config:cache
 ```
 
-Do not leave `public/hot` from a stopped Vite process; Laravel will continue
-emitting its dev-server URLs until that file is removed.
+### Processing limits
 
-### Automated Pruning & Scheduled Tasks
-Ensure the Laravel scheduler runs periodically to purge expired files:
+These values can be overridden in `.env`:
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `FP_DAILY_GUEST_FILES` | `20` | Daily file quota for guests |
+| `FP_DAILY_AUTH_FILES` | `50` | Daily file quota for signed-in users |
+| `FP_MAX_BATCH_FILES` | `50` | Maximum files in one batch |
+| `FP_MAX_PDF_SIZE_KB` | `51200` | Maximum size of one PDF (50 MB) |
+| `FP_MAX_IMAGE_SIZE_KB` | `25600` | Maximum size of one image (25 MB) |
+| `FP_MAX_TOTAL_BATCH_KB` | `102400` | Maximum combined batch size (100 MB) |
+| `FP_FILE_RETENTION_MINUTES` | `60` | Retention time for processed files |
+
+PHP upload limits and the web server's request size limits must be large enough for the files you allow. Livewire's temporary upload limit is configured separately in `config/livewire.php`.
+
+## System capability check
+
+Check which optional binaries and core image/PDF capabilities are available:
+
 ```bash
-# Windows Task Scheduler or Linux Cron (every 15 minutes):
-php artisan schedule:run
+php artisan app:check-system-binaries
 ```
-Manual cleanup:
+
+Ghostscript is used for deeper PDF compression. Poppler (`pdftoppm`) is required for PDF-to-JPG/PNG rendering. Most other PDF operations use the PHP FPDI/FPDF libraries. Node.js is used for HEIC/HEIF conversion and some image-processing engines.
+
+## Scheduled cleanup
+
+The scheduler removes expired job files and old usage records. Run Laravel's scheduler every minute in production so scheduled tasks can run:
+
+```cron
+* * * * * cd /path/to/ka7loot-pdf && php artisan schedule:run >> /dev/null 2>&1
+```
+
+On Windows, configure Task Scheduler to run `php artisan schedule:run` regularly. You can also invoke file cleanup directly:
+
 ```bash
 php artisan app:cleanup-expired
 ```
 
----
+## Tests
 
-## Automated Test Suite
+Run the automated suite with:
 
-Run the full platform test suite:
 ```bash
 php artisan test
 ```
-All tests cover:
-- Unit file sanitization and security path traversal validation
-- FileStorageManager ephemeral isolation
-- Intervention Image v3 GD processing (compress, resize, convert, archive)
-- Pure-PHP PDF manipulation cluster (merge, split, organize, rotate, JPG-to-PDF)
-- Subprocess isolation & Ghostscript capability detection
-- ProcessFileJob idempotency and concurrent worker protection
-- Feature download validation, expiration rejection, immediate deletion, and RTL locale switching.
-- HEIC/HEIF validation and conversion through the Node.js/WASM worker.
+
+The suite covers PDF and image tools, upload and job handling, preview and progress flows, authorization and guest isolation, temporary sharing, cleanup, account flows, and English/Arabic UI behavior. Some HEIC, image-background, PDF-rendering, and browser verification paths depend on the required runtime or optional system tools.
