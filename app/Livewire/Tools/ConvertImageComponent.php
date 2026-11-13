@@ -16,6 +16,14 @@ class ConvertImageComponent extends BaseToolComponent
     public $upload = null;
     public string $targetFormat = 'png';
 
+    public ?string $filename = null;
+    public ?int $fileSizeBytes = null;
+    public ?string $fileSizeFormatted = null;
+    public ?string $sourceExtension = null;
+    public bool $isHeic = false;
+    public ?int $imageWidth = null;
+    public ?int $imageHeight = null;
+
     public function updatedUpload(): void
     {
         $maxImageKb = config('fileprocessor.limits.max_image_size_kb', 25600);
@@ -26,9 +34,57 @@ class ConvertImageComponent extends BaseToolComponent
 
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
+            $this->filename = $this->upload->getClientOriginalName();
+            $this->fileSizeBytes = $this->upload->getSize();
+            $this->fileSizeFormatted = $this->formatFileSize($this->fileSizeBytes);
+
             $ext = strtolower($this->upload->getClientOriginalExtension());
+            $this->sourceExtension = $ext;
+            $this->isHeic = in_array($ext, ['heic', 'heif'], true);
+
             $this->targetFormat = in_array($ext, ['heic', 'heif', 'png'], true) ? 'jpg' : 'png';
+
+            if (!$this->isHeic) {
+                try {
+                    $path = $this->upload->getRealPath();
+                    if ($path && file_exists($path)) {
+                        $dims = @getimagesize($path);
+                        if ($dims) {
+                            $this->imageWidth = $dims[0];
+                            $this->imageHeight = $dims[1];
+                        }
+                    }
+                } catch (\Throwable) {}
+            }
         }
+    }
+
+    public function getPreviewUrl(): ?string
+    {
+        if (!$this->upload || $this->isHeic) {
+            return null;
+        }
+
+        try {
+            return $this->upload->temporaryUrl();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public function cancelToolUpload(): void
+    {
+        $this->reset(['upload', 'filename', 'fileSizeBytes', 'fileSizeFormatted', 'sourceExtension', 'isHeic', 'imageWidth', 'imageHeight']);
+        $this->jobStatus = 'idle';
+        $this->errorMessage = null;
+        $this->statusMessage = null;
+    }
+
+    public function resetWorkflow(): void
+    {
+        $this->resetState();
+        $this->reset(['upload', 'filename', 'fileSizeBytes', 'fileSizeFormatted', 'sourceExtension', 'isHeic', 'imageWidth', 'imageHeight']);
+        $this->jobStatus = 'idle';
     }
 
     public function process(
@@ -82,7 +138,7 @@ class ConvertImageComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 

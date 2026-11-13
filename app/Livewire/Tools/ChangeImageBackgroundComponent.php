@@ -18,6 +18,16 @@ class ChangeImageBackgroundComponent extends BaseToolComponent
     /** @var \Livewire\Features\SupportFileUploads\TemporaryUploadedFile|null */
     public $bgUpload = null;
 
+    public string $filename = '';
+    public int $fileSizeBytes = 0;
+    public string $fileSizeFormatted = '';
+    public int $imageWidth = 0;
+    public int $imageHeight = 0;
+
+    public string $bgFilename = '';
+    public int $bgFileSizeBytes = 0;
+    public string $bgFileSizeFormatted = '';
+
     public string $backgroundType = 'solid'; // 'transparent', 'solid', 'gradient', 'image'
     public string $solidColor = '#FFFFFF';
     public string $gradientStart = '#4F46E5';
@@ -29,9 +39,6 @@ class ChangeImageBackgroundComponent extends BaseToolComponent
     public int $feather = 2;
     public bool $floodFill = true;
 
-    public ?string $originalPreviewUri = null;
-    public ?string $bgPreviewUri = null;
-
     public function updatedUpload(): void
     {
         $maxKb = config('fileprocessor.limits.max_image_size_kb', 25600);
@@ -42,15 +49,22 @@ class ChangeImageBackgroundComponent extends BaseToolComponent
 
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
+            $this->filename = $this->upload->getClientOriginalName();
+            $this->fileSizeBytes = (int) $this->upload->getSize();
+            $this->fileSizeFormatted = $this->formatFileSize($this->fileSizeBytes);
+
             try {
                 $path = $this->upload->getRealPath();
                 if ($path && file_exists($path)) {
-                    $mime = $this->upload->getMimeType() ?: 'image/png';
-                    $data = file_get_contents($path);
-                    $this->originalPreviewUri = 'data:' . $mime . ';base64,' . base64_encode($data);
+                    $dims = @getimagesize($path);
+                    if ($dims) {
+                        $this->imageWidth = (int) $dims[0];
+                        $this->imageHeight = (int) $dims[1];
+                    }
                 }
             } catch (\Throwable) {
-                $this->originalPreviewUri = null;
+                $this->imageWidth = 0;
+                $this->imageHeight = 0;
             }
         }
     }
@@ -64,16 +78,73 @@ class ChangeImageBackgroundComponent extends BaseToolComponent
         ]);
 
         if ($this->bgUpload) {
-            try {
-                $path = $this->bgUpload->getRealPath();
-                if ($path && file_exists($path)) {
-                    $mime = $this->bgUpload->getMimeType() ?: 'image/png';
-                    $data = file_get_contents($path);
-                    $this->bgPreviewUri = 'data:' . $mime . ';base64,' . base64_encode($data);
-                }
-            } catch (\Throwable) {
-                $this->bgPreviewUri = null;
-            }
+            $this->bgFilename = $this->bgUpload->getClientOriginalName();
+            $this->bgFileSizeBytes = (int) $this->bgUpload->getSize();
+            $this->bgFileSizeFormatted = $this->formatFileSize($this->bgFileSizeBytes);
+        }
+    }
+
+    public function clearBgUpload(): void
+    {
+        $this->bgUpload = null;
+        $this->bgFilename = '';
+        $this->bgFileSizeBytes = 0;
+        $this->bgFileSizeFormatted = '';
+    }
+
+    public function cancelToolUpload(): void
+    {
+        parent::cancelToolUpload();
+        $this->upload = null;
+        $this->bgUpload = null;
+        $this->filename = '';
+        $this->fileSizeBytes = 0;
+        $this->fileSizeFormatted = '';
+        $this->imageWidth = 0;
+        $this->imageHeight = 0;
+        $this->bgFilename = '';
+        $this->bgFileSizeBytes = 0;
+        $this->bgFileSizeFormatted = '';
+        $this->backgroundType = 'solid';
+        $this->solidColor = '#FFFFFF';
+        $this->gradientStart = '#4F46E5';
+        $this->gradientEnd = '#06B6D4';
+        $this->gradientDirection = 'vertical';
+        $this->bgFit = 'cover';
+        $this->tolerance = 25.0;
+        $this->feather = 2;
+        $this->floodFill = true;
+    }
+
+    public function resetWorkflow(): void
+    {
+        parent::resetWorkflow();
+        $this->cancelToolUpload();
+    }
+
+    public function getPreviewUrl(): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        try {
+            return $this->upload->temporaryUrl();
+        } catch (\Throwable) {
+            return '';
+        }
+    }
+
+    public function getBgPreviewUrl(): string
+    {
+        if (! $this->bgUpload) {
+            return '';
+        }
+
+        try {
+            return $this->bgUpload->temporaryUrl();
+        } catch (\Throwable) {
+            return '';
         }
     }
 
@@ -168,14 +239,8 @@ class ChangeImageBackgroundComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
-    }
-
-    public function resetWorkflow(): void
-    {
-        parent::resetWorkflow();
-        $this->reset(['upload', 'bgUpload', 'originalPreviewUri', 'bgPreviewUri']);
     }
 
     public function render()

@@ -68,25 +68,97 @@
             </div>
         @else
             <div class="max-w-2xl mx-auto space-y-6">
-                <!-- File Pill -->
-                <div class="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-                    <div class="flex items-center gap-3 min-w-0">
-                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                        </div>
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                                <h4 class="truncate font-semibold text-slate-800 text-sm">{{ $upload->getClientOriginalName() }}</h4>
-                                <span class="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                                    {{ __('ui.state_uploaded') }}
-                                </span>
+                <!-- Document Preview & Info Card -->
+                <div class="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-xs">
+                    <div class="flex flex-col sm:flex-row items-center gap-5">
+                        <!-- Portrait Page 1 Thumbnail with Progressive Preview -->
+                        <div class="w-36 sm:w-40 shrink-0"
+                             x-data="pdfProgressivePreview({
+                                 url: '{{ $this->getPreviewUrl(1, 120) }}',
+                                 highResUrl: '{{ $this->getHighResPreviewUrl(1) }}',
+                                 page: 1,
+                                 refreshUrl: () => $wire.getPreviewUrl(1, 120),
+                                 refreshHighResUrl: () => $wire.getHighResPreviewUrl(1)
+                             })">
+                            <div class="group relative aspect-[3/4] w-full rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center shadow-xs">
+                                <!-- Skeleton while loading -->
+                                <template x-if="loading && !loaded">
+                                    <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 animate-pulse p-4">
+                                        <div class="h-7 w-7 rounded-lg bg-indigo-100/80 text-indigo-600 flex items-center justify-center mb-1.5">
+                                            <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                            </svg>
+                                        </div>
+                                        <div class="h-1.5 w-10 bg-slate-200 rounded"></div>
+                                    </div>
+                                </template>
+
+                                <!-- Error State with Retry Button -->
+                                <template x-if="error">
+                                    <div class="absolute inset-0 flex flex-col items-center justify-center bg-rose-50/50 p-2 text-center">
+                                        <svg class="h-5 w-5 text-rose-500 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                        <span class="text-[10px] text-rose-700 font-medium leading-tight">{{ __('ui.preview_failed') }}</span>
+                                        <button @click="retry()" type="button" class="mt-1 text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer">
+                                            {{ __('tools.split_pdf.retry') }}
+                                        </button>
+                                    </div>
+                                </template>
+
+                                <!-- Rendered Page Preview Image -->
+                                <img x-show="loaded"
+                                     :src="url"
+                                     loading="lazy"
+                                     class="h-full w-full object-contain transition-transform duration-200 group-hover:scale-[1.02]"
+                                     alt="Page 1 Preview">
+
+                                <!-- Hover Inspect Button -->
+                                <div class="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                    <button type="button"
+                                            @click.stop="$dispatch('open-pdf-modal', { page: 1, url: '{{ $this->getHighResPreviewUrl(1) }}', title: '{{ addslashes($upload->getClientOriginalName()) }}' })"
+                                            class="pointer-events-auto rounded-xl bg-white/95 px-2.5 py-1 text-xs font-bold text-slate-800 shadow-md backdrop-blur-xs hover:bg-white hover:scale-105 transition cursor-pointer">
+                                        {{ __('tools.split_pdf.inspect_page') }}
+                                    </button>
+                                </div>
+
+                                <!-- Page 1 Badge -->
+                                <div class="absolute bottom-1.5 start-1.5 rounded bg-slate-900/70 backdrop-blur-xs px-1.5 py-0.5 text-[9px] font-bold text-white tracking-wide">
+                                    {{ __('ui.page') }} 1
+                                </div>
                             </div>
-                            <p class="text-xs text-slate-400">{{ number_format($upload->getSize() / 1024, 1) }} KB</p>
+                        </div>
+
+                        <!-- Document Details & Actions -->
+                        <div class="flex-1 min-w-0 space-y-2 w-full">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <h4 class="truncate font-bold text-slate-900 text-sm sm:text-base" title="{{ $upload->getClientOriginalName() }}">
+                                        {{ $upload->getClientOriginalName() }}
+                                    </h4>
+                                    <div class="flex items-center gap-2 mt-1">
+                                        <span class="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                                            {{ __('ui.state_uploaded') }}
+                                        </span>
+                                        <span class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-bold text-indigo-700">
+                                            {{ $pageCount }} {{ $pageCount === 1 ? __('ui.page') : __('ui.pages') }}
+                                        </span>
+                                        <span class="text-xs text-slate-400">
+                                            {{ $fileSizeFormatted ?: number_format($upload->getSize() / 1024, 1) . ' KB' }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <button wire:click="cancelToolUpload" class="text-xs font-semibold text-rose-600 hover:underline cursor-pointer shrink-0">
+                                    {{ __('ui.clear_all') }}
+                                </button>
+                            </div>
+
+                            <p class="text-xs text-slate-500 leading-relaxed pt-1">
+                                {{ __('tools.compress_pdf.desc') }}
+                            </p>
                         </div>
                     </div>
-                    <button wire:click="cancelToolUpload" class="text-xs font-semibold text-rose-600 hover:underline cursor-pointer">{{ __('ui.clear_all') }}</button>
                 </div>
 
                 <!-- Engine Status Banner -->
@@ -225,4 +297,6 @@
             </div>
         @endif
     @endif
+
+    @include('livewire.tools.pdf-inspect-modal')
 </div>

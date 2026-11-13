@@ -25,6 +25,7 @@ class CleanupExpiredCommand extends Command
 
         // 1. Process expired FileJobs from database
         $expiredJobs = FileJob::where('expires_at', '<', now())
+            ->whereNotIn('status', [JobStatus::PENDING, JobStatus::PROCESSING])
             ->where('status', '!=', JobStatus::EXPIRED)
             ->get();
 
@@ -46,10 +47,19 @@ class CleanupExpiredCommand extends Command
         if (is_dir($rootPath)) {
             $entries = scandir($rootPath);
             $cutoff = time() - ($retentionMinutes * 60);
+            $knownJobIds = FileJob::whereIn('id', $entries)->pluck('id')->flip();
             foreach ($entries as $entry) {
                 if ($entry === '.' || $entry === '..') {
                     continue;
                 }
+
+                // proc_tmp is shared by subprocesses without a job-specific temp path.
+                // Its directory timestamp does not change when nested files are used,
+                // so age-based orphan cleanup can otherwise delete an active process' files.
+                if ($entry === 'proc_tmp' || $knownJobIds->has($entry)) {
+                    continue;
+                }
+
                 $entryPath = $rootPath . DIRECTORY_SEPARATOR . $entry;
                 if (is_dir($entryPath) && filemtime($entryPath) < $cutoff) {
                     // Orphan or abandoned directory

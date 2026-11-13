@@ -29,6 +29,7 @@ export function fileUploadHandler(config = {}) {
         propertyName: config.propertyName || 'upload',
         isMultiple: config.multiple || false,
         queueBatches: config.queueBatches || false,
+        compact: config.compact || false,
         accept: config.accept || '',
         fileType: fileType,
         maxSizeMb: maxSizeMb,
@@ -56,6 +57,10 @@ export function fileUploadHandler(config = {}) {
         failedBatch: null,
         batchTimeoutTimer: null,
         batchTimeoutMs: config.batchTimeoutMs || 45000,
+
+        showUploadControl() {
+            return this.compact || this.queueBatches || this.uploadState === 'idle';
+        },
 
         // Sequential thumbnail loader state (concurrency limited to 1 so uploads are never blocked)
         thumbnailQueue: [],
@@ -212,6 +217,14 @@ export function fileUploadHandler(config = {}) {
         queueFiles(rawFiles, input) {
             this.clearErrors();
             const filesArray = this.isMultiple ? rawFiles : rawFiles.slice(0, 1);
+
+            if (this.isMultiple && this.maxBatchFiles && filesArray.length > this.maxBatchFiles) {
+                if (input) input.value = '';
+                this.errorMessage = this.messages.tooManyFiles;
+                this.rejectedFiles = [];
+                return;
+            }
+
             const validFiles = [];
             const rejected = [];
 
@@ -225,6 +238,13 @@ export function fileUploadHandler(config = {}) {
             }
 
             if (input) input.value = '';
+
+            const validTotalBytes = validFiles.reduce((total, file) => total + file.size, 0);
+            if (this.isMultiple && this.maxTotalBatchBytes && validTotalBytes > this.maxTotalBatchBytes) {
+                this.rejectedFiles = rejected;
+                this.errorMessage = this.messages.batchTooLarge;
+                return;
+            }
 
             if (rejected.length) {
                 this.rejectedFiles = rejected;
@@ -316,7 +336,7 @@ export function fileUploadHandler(config = {}) {
         },
 
         failBatch(batchId, errorMsg) {
-            if (this.activeBatch !== batchId && !this.activeBatch) return;
+            if (this.activeBatch !== batchId) return;
             this.clearBatchTimeout();
             const failedFiles = this.activeBatchFiles || [];
             this.failedBatch = { id: batchId, files: failedFiles };

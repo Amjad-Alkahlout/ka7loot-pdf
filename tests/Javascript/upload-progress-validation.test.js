@@ -473,3 +473,19 @@ test('batch failure or timeout enters error state and can be retried', () => {
     assert.equal(handler.uploadState, 'idle');
     assert.equal(handler.activeBatch, null);
 });
+
+test('compact add-more control stays visible after a non-queued upload completes', () => {
+    const handler = fileUploadHandler({
+        propertyName: 'newFiles',
+        multiple: true,
+        compact: true,
+    });
+
+    assert.equal(handler.showUploadControl(), true);
+    handler.onUploadFinish({ detail: { property: 'newFiles' } });
+    assert.equal(handler.uploadState, 'uploaded');
+    assert.equal(handler.showUploadControl(), true);
+
+    handler.prepareUpload([{ name: 'next.png', size: 10 }]);
+    assert.equal(handler.showUploadControl(), true);
+});

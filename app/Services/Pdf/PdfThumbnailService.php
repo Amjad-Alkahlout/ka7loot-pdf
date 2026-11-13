@@ -184,6 +184,9 @@ class PdfThumbnailService
         int $dpiOrScale = 150,
         int $quality = 85
     ): bool {
+        $sourcePath = realpath($sourcePath) ?: str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $sourcePath);
+        $outputPath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $outputPath);
+
         if (!file_exists($sourcePath) || !$this->detector->hasPoppler()) {
             return false;
         }
@@ -203,6 +206,14 @@ class PdfThumbnailService
             $prefix = $tmpDir . DIRECTORY_SEPARATOR . 'page';
             $quality = max(10, min(100, $quality));
 
+            $popplerInputPath = $sourcePath;
+            if (strlen($sourcePath) > 180 || str_contains($sourcePath, '-meta')) {
+                $shortCopy = $tmpDir . DIRECTORY_SEPARATOR . 'src_' . uniqid() . '.pdf';
+                if (@copy($sourcePath, $shortCopy)) {
+                    $popplerInputPath = $shortCopy;
+                }
+            }
+
             if ($dpiOrScale <= 300) {
                 $dpi = max(50, $dpiOrScale);
                 $cmd = [
@@ -216,7 +227,7 @@ class PdfThumbnailService
                     (string) $page,
                     '-l',
                     (string) $page,
-                    $sourcePath,
+                    $popplerInputPath,
                     $prefix,
                 ];
             } else {
@@ -232,7 +243,7 @@ class PdfThumbnailService
                     (string) $page,
                     '-l',
                     (string) $page,
-                    $sourcePath,
+                    $popplerInputPath,
                     $prefix,
                 ];
             }
@@ -291,12 +302,15 @@ class PdfThumbnailService
         string $sourcePath,
         int $page = 1,
         int $dpiOrScale = 150,
-        int $quality = 85
+        int $quality = 85,
+        ?string $contentHash = null
     ): string {
         $dir = $this->getPreviewCacheDirectory($sourcePath);
         $contentKey = '0';
 
-        if (file_exists($sourcePath)) {
+        if ($contentHash !== null) {
+            $contentKey = $contentHash === '0' ? '0' : substr($contentHash, 0, 32);
+        } elseif (file_exists($sourcePath)) {
             $sha256 = @hash_file('sha256', $sourcePath);
             $contentKey = $sha256 ? substr($sha256, 0, 32) : '0';
         }

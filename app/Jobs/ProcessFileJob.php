@@ -641,8 +641,23 @@ class ProcessFileJob implements ShouldQueue
 
             $durationMs = (int) round((hrtime(true) - $startTime) / 1e6);
 
+            $inputMetadata = $job->input_metadata ?? [];
+            $ipHash = $inputMetadata['ip_hash'] ?? hash(
+                'sha256',
+                (string) ($inputMetadata['ip'] ?? '127.0.0.1') . config('app.key')
+            );
+            $metadataToPersist = array_merge(
+                $resultMeta,
+                array_intersect_key($inputMetadata, [
+                    'session_id' => true,
+                    'guest_session_key' => true,
+                ])
+            );
+            unset($metadataToPersist['ip']);
+            $metadataToPersist['ip_hash'] = $ipHash;
+
             // Persist output files & transition state atomically
-            DB::transaction(function () use ($job, $outputs, $resultMeta, $durationMs, $totalInputBytes) {
+            DB::transaction(function () use ($job, $outputs, $metadataToPersist, $ipHash, $durationMs, $totalInputBytes) {
                 ProcessedFile::where('file_job_id', $job->id)->delete();
 
                 foreach ($outputs as $out) {
@@ -661,14 +676,13 @@ class ProcessFileJob implements ShouldQueue
                     'status' => JobStatus::COMPLETED,
                     'processing_finished_at' => now(),
                     'duration_ms' => $durationMs,
-                    'input_metadata' => $resultMeta,
+                    'input_metadata' => $metadataToPersist,
                     'error_message' => null,
                 ]);
 
-                $ip = $job->input_metadata['ip'] ?? '127.0.0.1';
-                ToolUsage::log(
+                ToolUsage::logWithIpHash(
                     toolType: $job->tool_type->value,
-                    ip: $ip,
+                    ipHash: $ipHash,
                     successful: true,
                     bytes: $totalInputBytes,
                     durationMs: $durationMs,
@@ -690,17 +704,25 @@ class ProcessFileJob implements ShouldQueue
             if ($job) {
                 $quota = app(DailyFileQuotaService::class);
                 $quota->release($job);
+                $metadata = $job->input_metadata ?? [];
+                $ipHash = $metadata['ip_hash'] ?? hash(
+                    'sha256',
+                    (string) ($metadata['ip'] ?? '127.0.0.1') . config('app.key')
+                );
+                unset($metadata['ip']);
+                $metadata['ip_hash'] = $ipHash;
+
                 $job->update([
                     'status' => JobStatus::FAILED,
                     'processing_finished_at' => now(),
                     'duration_ms' => $durationMs,
-                    'error_message' => $e->getMessage(),
+                    'error_message' => __('ui.error_processing_generic'),
+                    'input_metadata' => $metadata,
                 ]);
 
-                $ip = $job->input_metadata['ip'] ?? '127.0.0.1';
-                ToolUsage::log(
+                ToolUsage::logWithIpHash(
                     toolType: $job->tool_type->value,
-                    ip: $ip,
+                    ipHash: $ipHash,
                     successful: false,
                     bytes: 0,
                     durationMs: $durationMs,

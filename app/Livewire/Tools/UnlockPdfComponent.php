@@ -20,6 +20,10 @@ class UnlockPdfComponent extends BaseToolComponent
     /** @var TemporaryUploadedFile|null */
     public $upload = null;
 
+    public string $filename = '';
+    public int $fileSizeBytes = 0;
+    public string $fileSizeFormatted = '';
+
     public string $password = '';
 
     public function updatedUpload(): void
@@ -32,7 +36,19 @@ class UnlockPdfComponent extends BaseToolComponent
 
         if ($this->upload) {
             $this->jobStatus = 'uploaded';
+            $this->filename = $this->upload->getClientOriginalName();
+            $this->fileSizeBytes = (int) $this->upload->getSize();
+            $this->fileSizeFormatted = $this->formatFileSize($this->fileSizeBytes);
         }
+    }
+
+    public function cancelToolUpload(): void
+    {
+        parent::cancelToolUpload();
+        $this->filename = '';
+        $this->fileSizeBytes = 0;
+        $this->fileSizeFormatted = '';
+        $this->password = '';
     }
 
     public function process(
@@ -50,6 +66,7 @@ class UnlockPdfComponent extends BaseToolComponent
         try {
             $quota->assertAvailable();
         } catch (Throwable $e) {
+            $this->reset(['password']);
             $this->addError('upload', $e->getMessage());
             $this->jobStatus = 'uploaded';
 
@@ -71,6 +88,7 @@ class UnlockPdfComponent extends BaseToolComponent
 
             // 1. Check if the PDF is actually protected
             if (! $removalService->isEncrypted($sourcePath)) {
+                $this->reset(['password']);
                 $this->jobStatus = 'uploaded';
                 $this->addError('upload', __('tools.unlock_pdf.error_not_encrypted'));
 
@@ -144,7 +162,7 @@ class UnlockPdfComponent extends BaseToolComponent
         } catch (Throwable $e) {
             $this->reset(['password']);
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 

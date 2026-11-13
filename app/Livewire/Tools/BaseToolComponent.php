@@ -5,9 +5,13 @@ namespace App\Livewire\Tools;
 use App\Enums\JobStatus;
 use App\Models\FileJob;
 use App\Models\ProcessedFile;
+use App\Models\TemporaryShare;
 use App\Services\File\DailyFileQuotaService;
 use App\Services\File\FileStorageManager;
+use App\Services\Pdf\PdfThumbnailService;
 use App\Services\Share\TemporaryShareService;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
@@ -123,7 +127,7 @@ abstract class BaseToolComponent extends Component
             $this->jobStatus = 'completed';
         } elseif ($job->status === JobStatus::FAILED) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $job->error_message ?? __('ui.status_failed');
+            $this->errorMessage = __('ui.error_processing_generic');
         } elseif ($job->status === JobStatus::PROCESSING) {
             $this->jobStatus = 'processing';
             $this->statusMessage = __('ui.status_processing');
@@ -147,6 +151,17 @@ abstract class BaseToolComponent extends Component
      */
     public function resetUpload(): void
     {
+        foreach (['upload', 'uploads', 'newFiles'] as $property) {
+            if (! property_exists($this, $property)) {
+                continue;
+            }
+
+            $files = is_array($this->{$property}) ? $this->{$property} : [$this->{$property}];
+            foreach ($files as $file) {
+                $this->cleanupPdfPreviewCacheForUpload($file);
+            }
+        }
+
         if (property_exists($this, 'upload')) {
             $this->upload = null;
         }
@@ -155,6 +170,23 @@ abstract class BaseToolComponent extends Component
         }
         if (property_exists($this, 'newFiles')) {
             $this->newFiles = [];
+        }
+    }
+
+    /** Remove cached page renders when their selected temporary source leaves the workflow. */
+    protected function cleanupPdfPreviewCacheForUpload(mixed $upload): void
+    {
+        if (! is_object($upload) || ! method_exists($upload, 'getRealPath')) {
+            return;
+        }
+
+        try {
+            $sourcePath = $upload->getRealPath();
+            if ($sourcePath && is_file($sourcePath)) {
+                app(PdfThumbnailService::class)->deleteThumbnailsForPdf($sourcePath);
+            }
+        } catch (\Throwable) {
+            // Preview cleanup must not prevent the user from resetting their upload.
         }
     }
 
@@ -242,7 +274,8 @@ abstract class BaseToolComponent extends Component
             $this->activeShareRemainingDownloads = $res['share']->remaining_downloads;
             $this->shareMessage = null;
         } catch (\Throwable $e) {
-            $this->shareMessage = $e->getMessage();
+            $this->logToolFailure($e);
+            $this->shareMessage = __('ui.error_processing_generic');
         }
     }
 
@@ -251,8 +284,16 @@ abstract class BaseToolComponent extends Component
      */
     public function revokeActiveShare(TemporaryShareService $shareService): void
     {
-        if ($this->activeShareId) {
-            $shareService->revokeShare($this->activeShareId);
+        $job = $this->fileJob;
+
+        if ($job && $this->activeShareId) {
+            $share = TemporaryShare::where('file_job_id', $job->id)
+                ->whereKey($this->activeShareId)
+                ->first();
+
+            if ($share) {
+                $shareService->revokeShare($share);
+            }
         }
 
         $this->activeShareId = null;
@@ -301,7 +342,13 @@ abstract class BaseToolComponent extends Component
             return collect();
         }
 
-        return ProcessedFile::where('file_job_id', $this->fileJobId)->get();
+        $job = $this->findCurrentJob();
+
+        if (! $job || $job->status !== JobStatus::COMPLETED) {
+            return collect();
+        }
+
+        return $job->processedFiles()->get();
     }
 
     /**
@@ -330,6 +377,73 @@ abstract class BaseToolComponent extends Component
             $query->whereNull('user_id');
         }
 
-        return $query->first();
+        $job = $query->first();
+
+        if (! $job) {
+            return null;
+        }
+
+        if (! auth()->check()) {
+            $jobSessionKey = $job->input_metadata['guest_session_key'] ?? null;
+            $currentSessionKey = FileJob::currentGuestSessionKey();
+
+            if (! is_string($jobSessionKey) || ! hash_equals($jobSessionKey, $currentSessionKey)) {
+                return null;
+            }
+        }
+
+        return $job;
+    }
+
+    protected function formatFileSize(int $bytes): string
+    {
+        if ($bytes >= 1048576) {
+            return round($bytes / 1048576, 2) . ' MB';
+        }
+
+        return round($bytes / 1024, 1) . ' KB';
+    }
+
+    /** Keep infrastructure exception details in server logs, not Livewire responses. */
+    protected function reportToolFailure(\Throwable $exception, ?string $safeClientMessage = null): string
+    {
+        $this->logToolFailure($exception);
+
+        return $safeClientMessage ?? __('ui.error_processing_generic');
+    }
+
+    private function logToolFailure(\Throwable $exception): void
+    {
+        Log::error('Tool operation failed.', [
+            'component' => static::class,
+            'file_job_id' => $this->fileJobId,
+            'exception' => get_class($exception),
+        ]);
+    }
+
+    /** Enforce the configured per-job limits for tools that accept multiple uploads. */
+    protected function validateUploadBatchLimits(array $uploads, string $attribute = 'uploads'): void
+    {
+        $maxFiles = $this->getMaxBatchFiles();
+        if (count($uploads) > $maxFiles) {
+            throw ValidationException::withMessages([
+                $attribute => [__('ui.error_too_many_files', ['max' => $maxFiles])],
+            ]);
+        }
+
+        $maxTotalKb = (int) config('fileprocessor.limits.max_total_batch_kb', 102400);
+        $maxTotalBytes = $maxTotalKb * 1024;
+        $totalBytes = array_sum(array_map(
+            static fn ($upload): int => is_object($upload) && method_exists($upload, 'getSize')
+                ? (int) $upload->getSize()
+                : 0,
+            $uploads
+        ));
+
+        if ($totalBytes > $maxTotalBytes) {
+            throw ValidationException::withMessages([
+                $attribute => [__('ui.error_batch_too_large', ['size' => round($maxTotalKb / 1024, 1)])],
+            ]);
+        }
     }
 }

@@ -11,7 +11,9 @@ use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfSplitService;
 use App\Services\Pdf\PdfThumbnailService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
+
 
 class SplitPdfComponent extends BaseToolComponent
 {
@@ -22,9 +24,6 @@ class SplitPdfComponent extends BaseToolComponent
     public int $fileSizeBytes = 0;
     public string $fileSizeFormatted = '';
     public int $pageCount = 0;
-
-    /** @var array<int, string> Page number to base64 data URI */
-    public array $thumbnails = [];
 
     /** Split mode: 'range', 'every_n', or 'all' */
     public string $mode = 'range';
@@ -73,19 +72,16 @@ class SplitPdfComponent extends BaseToolComponent
                 $this->everyN = 1;
             }
 
-            // Generate low-resolution thumbnails
-            try {
-                $thumbService = app(PdfThumbnailService::class);
-                $this->thumbnails = $thumbService->generateThumbnails($realPath, maxPages: 30, scale: 160);
-            } catch (\Throwable $e) {
-                Log::warning("SplitPdfComponent: Failed to generate thumbnails: " . $e->getMessage());
-                $this->thumbnails = [];
+            // Ensure isolated preview session id is established
+            if (! session()->has('preview_session_id')) {
+                session()->put('preview_session_id', session()->getId());
             }
 
             $this->jobStatus = 'uploaded';
             $this->validateActiveMode();
         }
     }
+
 
     public function setMode(string $newMode): void
     {
@@ -416,7 +412,7 @@ class SplitPdfComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 
@@ -427,12 +423,44 @@ class SplitPdfComponent extends BaseToolComponent
         $this->fileSizeBytes = 0;
         $this->fileSizeFormatted = '';
         $this->pageCount = 0;
-        $this->thumbnails = [];
         $this->range = '1';
         $this->everyN = 2;
         $this->rangeError = null;
         $this->everyNError = null;
     }
+
+    /**
+     * Generate secure signed temporary preview URL for an uploaded PDF page.
+     */
+    public function getPreviewUrl(int $page, int $dpi = 120): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        $sessionId = (string) (session()->get('preview_session_id') ?: session()->getId());
+        session()->put('preview_session_id', $sessionId);
+
+        return URL::temporarySignedRoute(
+            'tools.pdf-preview',
+            now()->addHour(),
+            [
+                'filename'   => $this->upload->getFilename(),
+                'page'       => $page,
+                'dpi'        => $dpi,
+                'session_id' => $sessionId,
+            ]
+        );
+    }
+
+    /**
+     * Generate higher-resolution signed URL for crisp inspection of handwritten or fine text.
+     */
+    public function getHighResPreviewUrl(int $page): string
+    {
+        return $this->getPreviewUrl($page, 220);
+    }
+
 
     protected function formatFileSize(int $bytes): string
     {

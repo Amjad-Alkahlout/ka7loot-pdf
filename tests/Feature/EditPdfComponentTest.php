@@ -335,7 +335,7 @@ class EditPdfComponentTest extends TestCase
 
             // Verify clean image markup
             $this->assertStringContainsString('<img', $html);
-            $this->assertMatchesRegularExpression('/<img[^>]+src="data:image\/jpeg;base64,[^"]+"/', $html);
+            $this->assertMatchesRegularExpression('/<img[^>]+src="[^"]*(data:image\/jpeg;base64|tools\/pdf-preview)[^"]*"/', $html);
         }
     }
     public function test_logical_text_group_selection_and_replacement_workflow(): void

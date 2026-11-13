@@ -189,7 +189,7 @@
             </div>
 
             <!-- Desktop Nav Links -->
-            <nav class="hidden items-center gap-1 md:flex">
+            <nav class="hidden items-center gap-1 xl:flex">
                 <a href="{{ route('home', [], false) }}" class="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition">{{ __('ui.home') }}</a>
                 <a href="{{ route('tools.merge-pdf') }}" class="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition">{{ __('tools.merge_pdf.title') }}</a>
                 <a href="{{ route('tools.compress-pdf') }}" class="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition">{{ __('tools.compress_pdf.title') }}</a>
@@ -304,7 +304,7 @@
                         aria-expanded="false"
                         aria-controls="mobile-nav-drawer"
                         aria-label="{{ __('ui.toggle_navigation') }}"
-                        class="md:hidden inline-flex items-center justify-center h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer">
+                        class="xl:hidden inline-flex items-center justify-center h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer">
                     <svg id="mobile-hamburger-icon" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
                     </svg>

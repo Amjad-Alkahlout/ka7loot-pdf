@@ -49,6 +49,22 @@ class FileStorageManagerTest extends TestCase
         $this->storage->getJobDirectory('../../malicious_path');
     }
 
+    public function test_path_guard_rejects_sibling_directory_with_root_prefix(): void
+    {
+        $root = $this->storage->getRootPath();
+        $sibling = $root . '_outside';
+        mkdir($sibling, 0755, true);
+
+        try {
+            $guard = new \ReflectionMethod($this->storage, 'assertWithinRoot');
+
+            $this->expectException(InvalidArgumentException::class);
+            $guard->invoke($this->storage, $sibling . DIRECTORY_SEPARATOR . 'escaped.txt');
+        } finally {
+            rmdir($sibling);
+        }
+    }
+
     public function test_deletes_job_directory_cleanly(): void
     {
         $this->storage->getJobDirectory($this->testJobId);

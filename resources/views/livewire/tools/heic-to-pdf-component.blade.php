@@ -129,72 +129,103 @@
                     {{ __('tools.heic_to_pdf.reorder_hint') }}
                 </p>
 
-                <!-- Reorderable Files List with High-Performance Previews -->
-                <div class="space-y-3">
+                <!-- Reorderable Files Gallery Grid with High-Performance Previews & Drag-and-Drop -->
+                <div x-data="{
+                         onReorder(items) {
+                             $wire.reorderFiles(items);
+                         }
+                     }"
+                     x-sortable="onReorder"
+                     data-sortable-handle=".drag-handle"
+                     class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                     @foreach($uploads as $idx => $file)
                         @php
                             $previewUrl = $previewUrls[$idx] ?? null;
-                            $formattedFileSize = number_format($file->getSize() / 1024, 1) . ' KB';
-                            $originalName = $file->getClientOriginalName();
+                            $fileSizeBytes = is_object($file) && method_exists($file, 'getSize') ? $file->getSize() : 0;
+                            $formattedFileSize = number_format($fileSizeBytes / 1024, 1) . ' KB';
+                            $originalName = is_object($file) && method_exists($file, 'getClientOriginalName') ? $file->getClientOriginalName() : 'image.heic';
+                            $fileKey = is_object($file) && method_exists($file, 'getFilename') ? $file->getFilename() : (string) $idx;
                         @endphp
-                        <div wire:key="heic-file-item-{{ $idx }}-{{ $file->getFilename() }}"
-                             class="flex items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-4 rounded-2xl border border-slate-200 bg-white shadow-xs hover:border-slate-300 transition">
+                        <div wire:key="heic-file-item-{{ $idx }}-{{ $fileKey }}"
+                             data-id="{{ $fileKey }}"
+                             class="group relative flex flex-col justify-between rounded-2xl border border-slate-200/90 bg-white p-3 shadow-xs hover:border-indigo-300 hover:shadow-md transition">
                             
-                            <!-- Left: Number + Thumbnail + Info -->
-                            <div class="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
-                                <!-- Order Number -->
-                                <span class="inline-flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-xs sm:text-sm font-bold text-indigo-700">
-                                    {{ $idx + 1 }}
-                                </span>
-
-                                <!-- Thumbnail (64-80px rounded, sequential non-blocking loading & neutral fallback) -->
-                                <div x-data="{ loaded: false, failed: false }"
-                                     x-init="enqueueThumbnail(@js($previewUrl), () => { loaded = true; }, () => { failed = true; })"
-                                     class="shrink-0">
+                            <!-- Card Header: Index Badge, Drag Handle, Remove Button -->
+                            <div class="flex items-center justify-between gap-1 pb-2">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-50 text-xs font-black text-indigo-700">
+                                        {{ $idx + 1 }}
+                                    </span>
                                     <button type="button"
-                                            x-on:click="@js((bool)$previewUrl) ? openPreview(@js($previewUrl), @js($originalName), @js($formattedFileSize)) : null"
-                                            class="relative h-16 w-16 sm:h-20 sm:w-20 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-2xs group focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer block"
-                                            title="{{ __('ui.click_to_preview') }}">
-                                        
-                                        <!-- Placeholder Skeleton while loading -->
-                                        <div x-show="!loaded && !failed"
-                                             class="absolute inset-0 flex items-center justify-center bg-slate-200 animate-pulse text-slate-400">
-                                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                            </svg>
-                                        </div>
-
-                                        @if($previewUrl)
-                                            <!-- Real Image Preview -->
-                                            <template x-if="loaded && !failed">
-                                                <img src="{{ $previewUrl }}"
-                                                     alt="{{ $originalName }}"
-                                                     class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105" />
-                                            </template>
-                                        @endif
-
-                                        <!-- Fallback Neutral File Icon if thumbnail fails (Never breaks the list) -->
-                                        <div x-show="failed || !@js((bool)$previewUrl)"
-                                             class="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 text-slate-400 p-1">
-                                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                            </svg>
-                                            <span class="text-[9px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">HEIC</span>
-                                        </div>
-
-                                        <!-- Zoom Icon Overlay on hover -->
-                                        <div x-show="loaded && !failed"
-                                             class="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
-                                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                                            </svg>
-                                        </div>
+                                            class="drag-handle text-slate-400 hover:text-slate-700 p-1 cursor-grab active:cursor-grabbing rounded-md hover:bg-slate-100 transition"
+                                            title="{{ __('ui.reorder') }}"
+                                            aria-label="{{ __('ui.reorder') }}">
+                                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16" />
+                                        </svg>
                                     </button>
                                 </div>
 
-                                <!-- File Information -->
-                                <div class="min-w-0 flex-1">
-                                    <h4 class="truncate font-semibold text-slate-800 text-sm sm:text-base" title="{{ $originalName }}">
+                                <button type="button"
+                                        wire:click="removeFile({{ $idx }})"
+                                        aria-label="{{ __('ui.remove') }}"
+                                        title="{{ __('ui.remove') }}"
+                                        class="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition cursor-pointer">
+                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <!-- Thumbnail (Sequential non-blocking loading & neutral fallback, object-contain for aspect preservation) -->
+                            <div x-data="{ loaded: false, failed: false }"
+                                 x-init="enqueueThumbnail(@js($previewUrl), () => { loaded = true; }, () => { failed = true; })"
+                                 class="relative w-full aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 border border-slate-200/60 flex items-center justify-center p-1.5">
+                                <button type="button"
+                                        x-on:click="@js((bool)$previewUrl) ? openPreview(@js($previewUrl), @js($originalName), @js($formattedFileSize)) : null"
+                                        class="relative h-full w-full overflow-hidden rounded-lg group focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer block"
+                                        title="{{ __('ui.click_to_preview') }}">
+                                    
+                                    <!-- Placeholder Skeleton while loading -->
+                                    <div x-show="!loaded && !failed"
+                                         class="absolute inset-0 flex items-center justify-center bg-slate-200 animate-pulse text-slate-400">
+                                        <svg class="h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                    </div>
+
+                                    @if($previewUrl)
+                                        <!-- Real Image Preview (object-contain preserves aspect ratio, never crops) -->
+                                        <template x-if="loaded && !failed">
+                                            <img src="{{ $previewUrl }}"
+                                                 alt="{{ $originalName }}"
+                                                 class="h-full w-full object-contain transition-transform duration-200 group-hover:scale-105" />
+                                        </template>
+                                    @endif
+
+                                    <!-- Fallback Neutral File Icon if thumbnail fails (Never breaks the list) -->
+                                    <div x-show="failed || !@js((bool)$previewUrl)"
+                                         class="absolute inset-0 flex flex-col items-center justify-center bg-slate-100 text-slate-400 p-1">
+                                        <svg class="h-8 w-8 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-0.5">HEIC</span>
+                                    </div>
+
+                                    <!-- Zoom Icon Overlay on hover -->
+                                    <div x-show="loaded && !failed"
+                                         class="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                                        </svg>
+                                    </div>
+                                </button>
+                            </div>
+
+                            <!-- Card Footer: File Information & Accessible Move Controls -->
+                            <div class="pt-2.5 space-y-1.5">
+                                <div class="min-w-0">
+                                    <h4 class="truncate font-semibold text-slate-800 text-xs sm:text-sm" title="{{ $originalName }}">
                                         {{ $originalName }}
                                     </h4>
                                     <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
@@ -203,41 +234,31 @@
                                         <span class="uppercase">HEIC</span>
                                     </div>
                                 </div>
-                            </div>
 
-                            <!-- Right: Reorder & Remove Actions -->
-                            <div class="flex items-center gap-1 sm:gap-1.5 shrink-0">
-                                <button type="button"
-                                        wire:click="moveUp({{ $idx }})"
-                                        {{ $idx === 0 ? 'disabled' : '' }}
-                                        aria-label="{{ __('ui.move_up') }}"
-                                        title="{{ __('ui.move_up') }}"
-                                        class="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer shadow-2xs">
-                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
-                                    </svg>
-                                </button>
+                                <!-- Accessible Reorder Controls -->
+                                <div class="flex items-center justify-end gap-1 pt-1 border-t border-slate-100">
+                                    <button type="button"
+                                            wire:click="moveUp({{ $idx }})"
+                                            {{ $idx === 0 ? 'disabled' : '' }}
+                                            aria-label="{{ __('ui.move_up') }}"
+                                            title="{{ __('ui.move_up') }}"
+                                            class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-indigo-600 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer shadow-2xs">
+                                        <svg class="h-3.5 w-3.5 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                        </svg>
+                                    </button>
 
-                                <button type="button"
-                                        wire:click="moveDown({{ $idx }})"
-                                        {{ $idx === count($uploads) - 1 ? 'disabled' : '' }}
-                                        aria-label="{{ __('ui.move_down') }}"
-                                        title="{{ __('ui.move_down') }}"
-                                        class="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer shadow-2xs">
-                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-                                    </svg>
-                                </button>
-
-                                <button type="button"
-                                        wire:click="removeFile({{ $idx }})"
-                                        aria-label="{{ __('ui.remove') }}"
-                                        title="{{ __('ui.remove') }}"
-                                        class="inline-flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 hover:border-rose-300 transition cursor-pointer shadow-2xs">
-                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
+                                    <button type="button"
+                                            wire:click="moveDown({{ $idx }})"
+                                            {{ $idx === count($uploads) - 1 ? 'disabled' : '' }}
+                                            aria-label="{{ __('ui.move_down') }}"
+                                            title="{{ __('ui.move_down') }}"
+                                            class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-indigo-600 disabled:opacity-25 disabled:pointer-events-none transition cursor-pointer shadow-2xs">
+                                        <svg class="h-3.5 w-3.5 rtl:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                        </svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     @endforeach

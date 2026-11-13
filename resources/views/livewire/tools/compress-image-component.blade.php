@@ -62,152 +62,183 @@
                 ])
             </div>
         @else
-            <div class="max-w-2xl mx-auto space-y-6">
-                <!-- File Pill -->
-                <div class="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white p-4 shadow-xs">
-                    <div class="flex items-center gap-3 min-w-0">
-                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
+            <div class="max-w-4xl mx-auto rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                    <!-- Image Preview Card -->
+                    <div x-data="{
+                             previewUrl: @js($this->getPreviewUrl()),
+                             loaded: false,
+                             failed: false,
+                             init() {
+                                 if (this.previewUrl) {
+                                     this.loaded = true;
+                                 }
+                             }
+                         }"
+                         class="rounded-2xl border border-slate-200 p-4 bg-slate-50 text-center">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">{{ __('tools.compress_image.preview_original') }}</span>
+                            @if($imageWidth && $imageHeight)
+                                <span class="text-[11px] font-mono text-slate-400 bg-white px-2 py-0.5 rounded-md border border-slate-200">{{ $imageWidth }}×{{ $imageHeight }} px</span>
+                            @endif
                         </div>
-                        <div class="min-w-0">
-                            <div class="flex items-center gap-2">
-                                <h4 class="truncate font-semibold text-slate-800 text-sm">{{ $upload->getClientOriginalName() }}</h4>
-                                <span class="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
-                                    {{ __('ui.state_uploaded') }}
-                                </span>
+                        <div class="h-64 flex items-center justify-center overflow-hidden rounded-xl bg-white border border-slate-200 relative"
+                             style="background-image: repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 16px 16px;">
+                            <template x-if="previewUrl">
+                                <img :src="previewUrl"
+                                     alt="{{ $filename ?: ($upload ? $upload->getClientOriginalName() : 'Preview') }}"
+                                     class="max-h-full max-w-full object-contain relative z-10 transition-transform duration-200 hover:scale-105"
+                                     x-on:load="loaded = true"
+                                     x-on:error="failed = true">
+                            </template>
+                            <template x-if="!previewUrl || failed">
+                                <div class="flex flex-col items-center justify-center text-slate-400 p-4">
+                                    <svg class="h-8 w-8 mb-1.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    <span class="text-xs font-medium">{{ __('ui.file_uploaded') }}</span>
+                                </div>
+                            </template>
+                        </div>
+                        <div class="mt-3 flex justify-between items-center text-xs text-slate-500">
+                            <div class="min-w-0 text-left">
+                                <p class="truncate max-w-[200px] font-medium text-slate-700" title="{{ $filename ?: ($upload ? $upload->getClientOriginalName() : '') }}">{{ $filename ?: ($upload ? $upload->getClientOriginalName() : '') }}</p>
+                                <p class="text-[11px] text-slate-400">{{ $fileSizeFormatted ?: ($upload ? number_format($upload->getSize() / 1024, 1) . ' KB' : '') }}</p>
                             </div>
-                            <p class="text-xs text-slate-400">{{ number_format($upload->getSize() / 1024, 1) }} KB</p>
-                        </div>
-                    </div>
-                    <button wire:click="cancelToolUpload" class="text-xs font-semibold text-rose-600 hover:underline cursor-pointer">{{ __('ui.clear_all') }}</button>
-                </div>
-
-                <!-- Engine Badge -->
-                <div class="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 text-xs text-indigo-950">
-                    <div class="flex items-start gap-3">
-                        <span class="text-base">🖼️</span>
-                        <div>
-                            <span class="font-bold">{{ __('ui.engine_used') }}:</span>
-                            <span class="font-semibold">{{ __('ui.engine_image_gd') }}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Method Switcher (Presets vs Target Size) -->
-                <div class="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs space-y-5">
-                    <div>
-                        <label class="block text-sm font-bold text-slate-900 mb-3">{{ __('tools.compress_image.method') }}</label>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <label class="relative flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition {{ $compressionMethod === 'preset' ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-slate-300' }}">
-                                <input type="radio" wire:model.live="compressionMethod" value="preset" class="sr-only">
-                                <span class="h-4 w-4 rounded-full border flex items-center justify-center {{ $compressionMethod === 'preset' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300' }}">
-                                    @if($compressionMethod === 'preset')
-                                        <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
-                                    @endif
-                                </span>
-                                <span class="font-bold text-sm text-slate-900">{{ __('tools.compress_image.method_preset') }}</span>
-                            </label>
-
-                            <label class="relative flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition {{ $compressionMethod === 'target' ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-slate-300' }}">
-                                <input type="radio" wire:model.live="compressionMethod" value="target" class="sr-only">
-                                <span class="h-4 w-4 rounded-full border flex items-center justify-center {{ $compressionMethod === 'target' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300' }}">
-                                    @if($compressionMethod === 'target')
-                                        <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
-                                    @endif
-                                </span>
-                                <span class="font-bold text-sm text-slate-900">{{ __('tools.compress_image.method_target') }}</span>
-                            </label>
+                            <button wire:click="cancelToolUpload" type="button" class="text-rose-600 hover:text-rose-700 font-semibold cursor-pointer">
+                                {{ __('ui.cancel') }}
+                            </button>
                         </div>
                     </div>
 
-                    @if($compressionMethod === 'preset')
-                        <!-- Preset Cards -->
-                        <div class="space-y-3 pt-2">
-                            <label class="block text-sm font-bold text-slate-900">{{ __('tools.compress_image.quality') }}</label>
-                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                <label class="relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition {{ $level === 'low' ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-slate-300' }}">
-                                    <input type="radio" wire:model.live="level" value="low" class="sr-only">
-                                    <span class="font-bold text-sm text-slate-900">{{ __('tools.compress_pdf.level_low') }}</span>
-                                    <span class="mt-1 text-xs text-slate-500">{{ __('tools.compress_image.quality_approx', ['percent' => 85]) }}</span>
-                                </label>
-                                <label class="relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition {{ $level === 'recommended' ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-slate-300' }}">
-                                    <input type="radio" wire:model.live="level" value="recommended" class="sr-only">
-                                    <span class="font-bold text-sm text-slate-900">{{ __('tools.compress_pdf.level_recommended') }}</span>
-                                    <span class="mt-1 text-xs text-slate-500">{{ __('tools.compress_image.quality_approx', ['percent' => 70]) }}</span>
-                                </label>
-                                <label class="relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition {{ $level === 'extreme' ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-slate-300' }}">
-                                    <input type="radio" wire:model.live="level" value="extreme" class="sr-only">
-                                    <span class="font-bold text-sm text-slate-900">{{ __('tools.compress_pdf.level_extreme') }}</span>
-                                    <span class="mt-1 text-xs text-slate-500">{{ __('tools.compress_image.quality_approx', ['percent' => 50]) }}</span>
-                                </label>
+                    <!-- Compression Settings & Actions -->
+                    <div class="space-y-5">
+                        <!-- Engine Badge -->
+                        <div class="rounded-2xl border border-indigo-200 bg-indigo-50/70 p-3 text-xs text-indigo-950">
+                            <div class="flex items-start gap-2.5">
+                                <span class="text-base">🖼️</span>
+                                <div>
+                                    <span class="font-bold">{{ __('ui.engine_used') }}:</span>
+                                    <span class="font-semibold">{{ __('ui.engine_image_gd') }}</span>
+                                </div>
                             </div>
                         </div>
-                    @else
-                        <!-- Target Size Controls -->
-                        <div class="space-y-4 pt-2">
+
+                        <!-- Method Switcher (Presets vs Target Size) -->
+                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/50 p-4 space-y-4">
                             <div>
-                                <label class="block text-sm font-bold text-slate-900 mb-1.5">{{ __('tools.compress_image.target_size_label') }}</label>
-                                <div class="flex items-center gap-2">
-                                    <div class="relative flex-1">
-                                        <input type="number"
-                                               step="any"
-                                               min="1"
-                                               wire:model.live="targetValue"
-                                               class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-800 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20"
-                                               placeholder="e.g. 200">
+                                <label class="block text-xs font-bold text-slate-800 uppercase tracking-wider mb-2.5">{{ __('tools.compress_image.method') }}</label>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <label class="relative flex items-center gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition {{ $compressionMethod === 'preset' ? 'border-indigo-600 bg-white' : 'border-slate-200 bg-white/50 hover:border-slate-300' }}">
+                                        <input type="radio" wire:model.live="compressionMethod" value="preset" class="sr-only">
+                                        <span class="h-4 w-4 rounded-full border flex items-center justify-center {{ $compressionMethod === 'preset' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300' }}">
+                                            @if($compressionMethod === 'preset')
+                                                <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+                                            @endif
+                                        </span>
+                                        <span class="font-bold text-xs text-slate-900">{{ __('tools.compress_image.method_preset') }}</span>
+                                    </label>
+
+                                    <label class="relative flex items-center gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition {{ $compressionMethod === 'target' ? 'border-indigo-600 bg-white' : 'border-slate-200 bg-white/50 hover:border-slate-300' }}">
+                                        <input type="radio" wire:model.live="compressionMethod" value="target" class="sr-only">
+                                        <span class="h-4 w-4 rounded-full border flex items-center justify-center {{ $compressionMethod === 'target' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300' }}">
+                                            @if($compressionMethod === 'target')
+                                                <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+                                            @endif
+                                        </span>
+                                        <span class="font-bold text-xs text-slate-900">{{ __('tools.compress_image.method_target') }}</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            @if($compressionMethod === 'preset')
+                                <!-- Preset Cards -->
+                                <div class="space-y-2 pt-1">
+                                    <label class="block text-xs font-bold text-slate-800">{{ __('tools.compress_image.quality') }}</label>
+                                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                        <label class="relative flex flex-col p-3 rounded-xl border-2 cursor-pointer transition {{ $level === 'low' ? 'border-indigo-600 bg-indigo-50/40' : 'border-slate-200 bg-white hover:border-slate-300' }}">
+                                            <input type="radio" wire:model.live="level" value="low" class="sr-only">
+                                            <span class="font-bold text-xs text-slate-900">{{ __('tools.compress_pdf.level_low') }}</span>
+                                            <span class="mt-0.5 text-[11px] text-slate-500">{{ __('tools.compress_image.quality_approx', ['percent' => 85]) }}</span>
+                                        </label>
+                                        <label class="relative flex flex-col p-3 rounded-xl border-2 cursor-pointer transition {{ $level === 'recommended' ? 'border-indigo-600 bg-indigo-50/40' : 'border-slate-200 bg-white hover:border-slate-300' }}">
+                                            <input type="radio" wire:model.live="level" value="recommended" class="sr-only">
+                                            <span class="font-bold text-xs text-slate-900">{{ __('tools.compress_pdf.level_recommended') }}</span>
+                                            <span class="mt-0.5 text-[11px] text-slate-500">{{ __('tools.compress_image.quality_approx', ['percent' => 70]) }}</span>
+                                        </label>
+                                        <label class="relative flex flex-col p-3 rounded-xl border-2 cursor-pointer transition {{ $level === 'extreme' ? 'border-indigo-600 bg-indigo-50/40' : 'border-slate-200 bg-white hover:border-slate-300' }}">
+                                            <input type="radio" wire:model.live="level" value="extreme" class="sr-only">
+                                            <span class="font-bold text-xs text-slate-900">{{ __('tools.compress_pdf.level_extreme') }}</span>
+                                            <span class="mt-0.5 text-[11px] text-slate-500">{{ __('tools.compress_image.quality_approx', ['percent' => 50]) }}</span>
+                                        </label>
                                     </div>
-                                    <select wire:model.live="targetUnit"
-                                            class="rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20">
-                                        <option value="kb">{{ __('tools.unit_kb') }}</option>
-                                        <option value="mb">{{ __('tools.unit_mb') }}</option>
-                                    </select>
                                 </div>
-                            </div>
+                            @else
+                                <!-- Target Size Controls -->
+                                <div class="space-y-3 pt-1">
+                                    <div>
+                                        <label class="block text-xs font-bold text-slate-800 mb-1">{{ __('tools.compress_image.target_size_label') }}</label>
+                                        <div class="flex items-center gap-2">
+                                            <div class="relative flex-1">
+                                                <input type="number"
+                                                       step="any"
+                                                       min="1"
+                                                       wire:model.live="targetValue"
+                                                       class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+                                                       placeholder="e.g. 200">
+                                            </div>
+                                            <select wire:model.live="targetUnit"
+                                                    class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600">
+                                                <option value="kb">{{ __('tools.unit_kb') }}</option>
+                                                <option value="mb">{{ __('tools.unit_mb') }}</option>
+                                            </select>
+                                        </div>
+                                    </div>
 
-                            <!-- Quality Priority -->
-                            <div>
-                                <label class="block text-sm font-bold text-slate-900 mb-2">{{ __('tools.compress_image.priority') }}</label>
-                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                                    <label class="flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer text-xs {{ $targetPriority === 'max_quality' ? 'border-indigo-600 bg-indigo-50/40 text-indigo-900 font-bold' : 'border-slate-200 text-slate-700' }}">
-                                        <input type="radio" wire:model.live="targetPriority" value="max_quality" class="sr-only">
-                                        <span>{{ __('tools.compress_image.priority_max_quality') }}</span>
-                                    </label>
-                                    <label class="flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer text-xs {{ $targetPriority === 'balanced' ? 'border-indigo-600 bg-indigo-50/40 text-indigo-900 font-bold' : 'border-slate-200 text-slate-700' }}">
-                                        <input type="radio" wire:model.live="targetPriority" value="balanced" class="sr-only">
-                                        <span>{{ __('tools.compress_image.priority_balanced') }}</span>
-                                    </label>
-                                    <label class="flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer text-xs {{ $targetPriority === 'smallest' ? 'border-indigo-600 bg-indigo-50/40 text-indigo-900 font-bold' : 'border-slate-200 text-slate-700' }}">
-                                        <input type="radio" wire:model.live="targetPriority" value="smallest" class="sr-only">
-                                        <span>{{ __('tools.compress_image.priority_smallest') }}</span>
-                                    </label>
+                                    <!-- Quality Priority -->
+                                    <div>
+                                        <label class="block text-xs font-bold text-slate-800 mb-1.5">{{ __('tools.compress_image.priority') }}</label>
+                                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                            <label class="flex items-center justify-center p-2 rounded-xl border cursor-pointer text-xs {{ $targetPriority === 'max_quality' ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900 font-bold' : 'border-slate-200 bg-white text-slate-700' }}">
+                                                <input type="radio" wire:model.live="targetPriority" value="max_quality" class="sr-only">
+                                                <span class="text-center">{{ __('tools.compress_image.priority_max_quality') }}</span>
+                                            </label>
+                                            <label class="flex items-center justify-center p-2 rounded-xl border cursor-pointer text-xs {{ $targetPriority === 'balanced' ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900 font-bold' : 'border-slate-200 bg-white text-slate-700' }}">
+                                                <input type="radio" wire:model.live="targetPriority" value="balanced" class="sr-only">
+                                                <span class="text-center">{{ __('tools.compress_image.priority_balanced') }}</span>
+                                            </label>
+                                            <label class="flex items-center justify-center p-2 rounded-xl border cursor-pointer text-xs {{ $targetPriority === 'smallest' ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900 font-bold' : 'border-slate-200 bg-white text-slate-700' }}">
+                                                <input type="radio" wire:model.live="targetPriority" value="smallest" class="sr-only">
+                                                <span class="text-center">{{ __('tools.compress_image.priority_smallest') }}</span>
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
+                            @endif
                         </div>
-                    @endif
-                </div>
 
-                <!-- Submit Button -->
-                <button wire:click="process"
-                        wire:loading.attr="disabled"
-                        type="button"
-                        class="w-full flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 py-4 px-6 text-base font-bold text-white shadow-lg shadow-indigo-600/25 hover:bg-indigo-700 transition active:scale-[0.99] disabled:opacity-50 cursor-pointer">
-                    <span wire:loading.remove wire:target="process">
-                        @if($compressionMethod === 'target' && is_numeric($targetValue) && (float)$targetValue > 0)
-                            {{ __('tools.compress_image.action_target', ['size' => $targetValue, 'unit' => ($targetUnit === 'mb' ? __('tools.unit_mb') : __('tools.unit_kb'))]) }}
-                        @else
-                            {{ __('tools.compress_image.action') }}
-                        @endif
-                    </span>
-                    <span wire:loading wire:target="process" class="flex items-center gap-2">
-                        <svg class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                        </svg>
-                        <span>{{ __('ui.processing') }}</span>
-                    </span>
-                </button>
+                        <!-- Submit Button -->
+                        <button wire:click="process"
+                                wire:loading.attr="disabled"
+                                type="button"
+                                class="w-full inline-flex justify-center items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-3.5 text-base font-bold text-white shadow-md hover:bg-indigo-700 transition cursor-pointer disabled:opacity-50">
+                            <span wire:loading.remove wire:target="process">
+                                @if($compressionMethod === 'target' && is_numeric($targetValue) && (float)$targetValue > 0)
+                                    {{ __('tools.compress_image.action_target', ['size' => $targetValue, 'unit' => ($targetUnit === 'mb' ? __('tools.unit_mb') : __('tools.unit_kb'))]) }}
+                                @else
+                                    {{ __('tools.compress_image.action') }}
+                                @endif
+                            </span>
+                            <span wire:loading wire:target="process" class="flex items-center gap-2">
+                                <svg class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                </svg>
+                                <span>{{ __('ui.processing') }}</span>
+                            </span>
+                        </button>
+                    </div>
+                </div>
             </div>
         @endif
     @endif

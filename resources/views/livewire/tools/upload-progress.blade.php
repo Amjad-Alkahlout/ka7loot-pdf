@@ -41,6 +41,7 @@
         propertyName: '{{ $propertyName }}',
         multiple: {{ $multiple ? 'true' : 'false' }},
         queueBatches: {{ $queueBatches ? 'true' : 'false' }},
+        compact: {{ $compact ? 'true' : 'false' }},
         accept: '{{ $accept }}',
         fileType: '{{ $resolvedFileType }}',
         maxSizeMb: {{ $resolvedMaxSizeMb }},
@@ -235,7 +236,7 @@
 
     @if($compact)
         <!-- COMPACT DROPZONE: Single row bar with dashed border -->
-        <div x-show="uploadState === 'idle' || queueBatches" class="w-full">
+        <div x-show="showUploadControl()" class="w-full">
             <label @dragover.prevent="isDragging = true"
                    @dragleave.prevent="isDragging = false"
                    @drop.prevent="isDragging = false; onFileDrop($event)"

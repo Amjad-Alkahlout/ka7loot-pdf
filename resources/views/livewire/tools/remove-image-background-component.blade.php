@@ -26,11 +26,11 @@
             <div class="max-w-4xl mx-auto rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
                 <h3 class="text-lg font-bold text-slate-900 mb-4">{{ __('tools.remove_background.result_ready') }}</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    @if($originalPreviewUri)
+                    @if($this->getPreviewUrl())
                         <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
                             <span class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">{{ __('tools.remove_background.preview_original') }}</span>
                             <div class="h-64 flex items-center justify-center overflow-hidden rounded-xl bg-slate-100">
-                                <img src="{{ $originalPreviewUri }}" alt="Original Image" class="max-h-full max-w-full object-contain">
+                                <img src="{{ $this->getPreviewUrl() }}" alt="Original Image" class="max-h-full max-w-full object-contain">
                             </div>
                         </div>
                     @endif
@@ -99,18 +99,47 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                     <!-- Image Preview Card -->
-                    <div class="rounded-2xl border border-slate-200 p-4 bg-slate-50 text-center">
-                        <span class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{{ __('tools.remove_background.preview_original') }}</span>
-                        <div class="h-64 flex items-center justify-center overflow-hidden rounded-xl bg-white border border-slate-200">
-                            @if($originalPreviewUri)
-                                <img src="{{ $originalPreviewUri }}" alt="Preview" class="max-h-full max-w-full object-contain">
-                            @else
-                                <span class="text-sm text-slate-400">{{ __('ui.file_uploaded') }}</span>
+                    <div x-data="{
+                             previewUrl: @js($this->getPreviewUrl()),
+                             loaded: false,
+                             failed: false,
+                             init() {
+                                 if (this.previewUrl) {
+                                     this.loaded = true;
+                                 }
+                             }
+                         }"
+                         class="rounded-2xl border border-slate-200 p-4 bg-slate-50 text-center">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">{{ __('tools.remove_background.preview_original') }}</span>
+                            @if($imageWidth && $imageHeight)
+                                <span class="text-[11px] font-mono text-slate-400 bg-white px-2 py-0.5 rounded-md border border-slate-200">{{ $imageWidth }}×{{ $imageHeight }} px</span>
                             @endif
                         </div>
+                        <div class="h-64 flex items-center justify-center overflow-hidden rounded-xl bg-white border border-slate-200 relative"
+                             style="background-image: repeating-conic-gradient(#f1f5f9 0% 25%, #ffffff 0% 50%) 50% / 16px 16px;">
+                            <template x-if="previewUrl">
+                                <img :src="previewUrl"
+                                     alt="{{ $upload->getClientOriginalName() }}"
+                                     class="max-h-full max-w-full object-contain relative z-10 transition-transform duration-200 hover:scale-105"
+                                     x-on:load="loaded = true"
+                                     x-on:error="failed = true">
+                            </template>
+                            <template x-if="!previewUrl || failed">
+                                <div class="flex flex-col items-center justify-center text-slate-400 p-4">
+                                    <svg class="h-8 w-8 mb-1.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    <span class="text-xs font-medium">{{ __('ui.file_uploaded') }}</span>
+                                </div>
+                            </template>
+                        </div>
                         <div class="mt-3 flex justify-between items-center text-xs text-slate-500">
-                            <span class="truncate max-w-[200px]">{{ $upload->getClientOriginalName() }}</span>
-                            <button wire:click="resetWorkflow" class="text-rose-600 hover:text-rose-700 font-medium cursor-pointer">
+                            <div class="min-w-0 text-left">
+                                <p class="truncate max-w-[200px] font-medium text-slate-700" title="{{ $upload->getClientOriginalName() }}">{{ $upload->getClientOriginalName() }}</p>
+                                <p class="text-[11px] text-slate-400">{{ $fileSizeFormatted }}</p>
+                            </div>
+                            <button wire:click="resetWorkflow" type="button" class="text-rose-600 hover:text-rose-700 font-semibold cursor-pointer">
                                 {{ __('ui.cancel') }}
                             </button>
                         </div>
@@ -124,7 +153,7 @@
                                 <label for="tolerance" class="text-sm font-semibold text-slate-800">{{ __('tools.remove_background.tolerance') }}</label>
                                 <span class="text-xs font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{{ (int)$tolerance }}%</span>
                             </div>
-                            <input type="range" id="tolerance" wire:model.live="tolerance" min="5" max="80" step="1"
+                            <input type="range" id="tolerance" wire:model.live.debounce.150ms="tolerance" min="5" max="80" step="1"
                                 class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                             <p class="text-xs text-slate-500 mt-1">{{ __('tools.remove_background.tolerance_hint') }}</p>
                         </div>
@@ -135,7 +164,7 @@
                                 <label for="feather" class="text-sm font-semibold text-slate-800">{{ __('tools.remove_background.feather') }}</label>
                                 <span class="text-xs font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{{ $feather }} px</span>
                             </div>
-                            <input type="range" id="feather" wire:model.live="feather" min="0" max="5" step="1"
+                            <input type="range" id="feather" wire:model.live.debounce.150ms="feather" min="0" max="5" step="1"
                                 class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600">
                             <p class="text-xs text-slate-500 mt-1">{{ __('tools.remove_background.feather_hint') }}</p>
                         </div>

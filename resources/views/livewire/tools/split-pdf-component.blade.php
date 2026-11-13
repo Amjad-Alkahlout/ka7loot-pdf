@@ -243,30 +243,71 @@
                                 };
                             @endphp
 
-                            <div wire:click="togglePage({{ $p }})"
+                            <div wire:key="split-page-{{ $p }}"
+                                 x-data="pdfProgressivePreview({
+                                     url: '{{ $this->getPreviewUrl($p, 120) }}',
+                                     highResUrl: '{{ $this->getHighResPreviewUrl($p) }}',
+                                     page: {{ $p }},
+                                     refreshUrl: () => $wire.getPreviewUrl({{ $p }}, 120),
+                                     refreshHighResUrl: () => $wire.getHighResPreviewUrl({{ $p }})
+                                 })"
+                                 wire:click="togglePage({{ $p }})"
                                  title="{{ $mode === 'range' ? 'Click to toggle page ' . $p : 'Page ' . $p }}"
                                  class="group relative flex flex-col rounded-xl border-2 transition overflow-hidden bg-slate-50 {{ $mode === 'range' ? 'cursor-pointer hover:shadow-md' : '' }} {{ $isIncluded ? ($colorClasses['border'] . ' ' . $colorClasses['ring'] . ' bg-white') : 'border-slate-200 opacity-40 hover:opacity-75 grayscale' }}">
 
-                                <!-- Top Bar: Page No + Group Badge -->
+                                <!-- Top Bar: Page No + Group Badge + Inspection button -->
                                 <div class="p-2 flex items-center justify-between bg-slate-50/80 border-b border-slate-100 text-[11px] font-bold">
                                     <span class="text-slate-700">{{ __('tools.split_pdf.page_badge', ['page' => $p]) }}</span>
-                                    @if($isIncluded)
-                                        <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold tracking-tight {{ $colorClasses['badge'] }}">
-                                            {{ $groupInfo['label'] }}
-                                        </span>
-                                    @else
-                                        <span class="text-[10px] text-slate-400 font-normal">
-                                            -
-                                        </span>
-                                    @endif
+                                    <div class="flex items-center gap-1.5">
+                                        @if($isIncluded)
+                                            <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold tracking-tight {{ $colorClasses['badge'] }}">
+                                                {{ $groupInfo['label'] }}
+                                            </span>
+                                        @else
+                                            <span class="text-[10px] text-slate-400 font-normal">
+                                                -
+                                            </span>
+                                        @endif
+                                        <button @click.stop="openInspect()"
+                                                type="button"
+                                                title="{{ __('tools.split_pdf.inspect_page') }}"
+                                                class="opacity-0 group-hover:opacity-100 transition p-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-white cursor-pointer">
+                                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
 
-                                <!-- Thumbnail Preview Area -->
+                                <!-- Thumbnail Preview Area (Progressive) -->
                                 <div class="relative aspect-[3/4] w-full flex items-center justify-center p-2 bg-slate-100/50">
-                                    @if(!empty($thumbnails[$p]))
-                                        <img src="{{ $thumbnails[$p] }}" alt="Page {{ $p }}" class="h-full w-full object-contain rounded shadow-2xs">
-                                    @else
-                                        <!-- Clean SVG Document Mockup -->
+                                    <!-- Skeleton while loading -->
+                                    <template x-if="loading && !loaded">
+                                        <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 animate-pulse p-4">
+                                            <div class="h-7 w-7 rounded-lg bg-indigo-100/80 text-indigo-600 flex items-center justify-center mb-1.5">
+                                                <svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                                                </svg>
+                                            </div>
+                                            <div class="h-1.5 w-10 bg-slate-200 rounded"></div>
+                                        </div>
+                                    </template>
+
+                                    <!-- Error State with Retry Button -->
+                                    <template x-if="error">
+                                        <div class="absolute inset-0 flex flex-col items-center justify-center bg-rose-50/60 p-2 text-center">
+                                            <svg class="h-5 w-5 text-rose-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                            </svg>
+                                            <button @click.stop="retry()" type="button" class="text-[10px] font-bold text-indigo-600 hover:underline">
+                                                {{ __('tools.split_pdf.retry') }}
+                                            </button>
+                                        </div>
+                                    </template>
+
+                                    <!-- Placeholder Mockup before observer intersection -->
+                                    <template x-if="!loaded && !loading && !error">
                                         <div class="h-full w-full rounded border border-slate-200 bg-white p-2 flex flex-col justify-between shadow-2xs">
                                             <div class="space-y-1">
                                                 <div class="h-1.5 w-3/4 bg-slate-200 rounded"></div>
@@ -278,7 +319,12 @@
                                             </div>
                                             <div class="h-1 w-1/2 bg-slate-100 rounded"></div>
                                         </div>
-                                    @endif
+                                    </template>
+
+                                    <!-- Rendered Crisp Thumbnail Image -->
+                                    <template x-if="loaded">
+                                        <img :src="url" alt="Page {{ $p }}" class="h-full w-full object-contain rounded shadow-2xs transition-opacity duration-200">
+                                    </template>
                                 </div>
                             </div>
                         @endfor
@@ -335,16 +381,13 @@
                                     <div class="flex items-center gap-1.5 overflow-x-auto py-1 max-w-full">
                                         @foreach(array_slice($group['pages'], 0, 10) as $pageNo)
                                             <div class="relative h-12 w-9 shrink-0 rounded border border-slate-200 overflow-hidden bg-white shadow-2xs flex items-center justify-center">
-                                                @if(!empty($thumbnails[$pageNo]))
-                                                    <img src="{{ $thumbnails[$pageNo] }}" alt="P{{ $pageNo }}" class="h-full w-full object-contain">
-                                                @else
-                                                    <span class="text-[10px] font-bold text-slate-400">{{ $pageNo }}</span>
-                                                @endif
+                                                <img src="{{ $this->getPreviewUrl($pageNo, 60) }}" alt="P{{ $pageNo }}" loading="lazy" class="h-full w-full object-contain">
                                                 <div class="absolute bottom-0 inset-x-0 bg-slate-900/70 text-white text-[8px] font-bold text-center leading-tight">
                                                     {{ $pageNo }}
                                                 </div>
                                             </div>
                                         @endforeach
+
                                         @if(count($group['pages']) > 10)
                                             <span class="text-xs font-bold text-slate-400 px-1.5">+{{ count($group['pages']) - 10 }}</span>
                                         @endif
@@ -377,4 +420,76 @@
             </div>
         @endif
     @endif
+
+    <!-- High-Resolution Document Page Inspection Modal -->
+    <div x-data="pdfInspectModal()"
+         x-cloak
+         x-show="isOpen"
+         @keydown.escape.window="close()"
+         class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
+        <div @click.away="close()"
+             class="relative max-w-4xl w-full bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <!-- Modal Header -->
+            <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/90">
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700 font-bold text-sm">
+                        <span x-text="page"></span>
+                    </span>
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-sm">
+                            {{ __('tools.split_pdf.page_badge', ['page' => '']) }}<span x-text="page"></span>
+                        </h3>
+                        <span class="text-xs text-slate-500">{{ __('tools.split_pdf.high_res_inspection') }}</span>
+                    </div>
+                </div>
+
+                <!-- Zoom Controls & Close Button -->
+                <div class="flex items-center gap-2">
+                    <button @click="zoomOut()"
+                            type="button"
+                            title="{{ __('tools.split_pdf.zoom_out') }}"
+                            class="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-100 font-bold text-base cursor-pointer">
+                        -
+                    </button>
+                    <span class="text-xs font-semibold text-slate-600 w-12 text-center" x-text="Math.round(zoom * 100) + '%'"></span>
+                    <button @click="zoomIn()"
+                            type="button"
+                            title="{{ __('tools.split_pdf.zoom_in') }}"
+                            class="h-8 w-8 rounded-lg border border-slate-200 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-100 font-bold text-base cursor-pointer">
+                        +
+                    </button>
+                    <button @click="resetZoom()"
+                            type="button"
+                            class="px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer">
+                        100%
+                    </button>
+                    <button @click="close()"
+                            type="button"
+                            title="{{ __('tools.split_pdf.close_preview') }}"
+                            class="ml-2 h-8 w-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer font-bold">
+                        &times;
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modal Body (Preview Canvas) -->
+            <div class="p-6 overflow-auto flex-1 flex items-center justify-center bg-slate-100/60 min-h-[350px]">
+                <template x-if="!imageLoaded">
+                    <div class="flex flex-col items-center gap-2 text-slate-400">
+                        <svg class="h-8 w-8 animate-spin text-indigo-600" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                        </svg>
+                        <span class="text-xs font-medium">{{ __('tools.split_pdf.preview_loading') }}</span>
+                    </div>
+                </template>
+                <img x-show="imageLoaded"
+                     :src="url"
+                     :style="`transform: scale(${zoom}); transform-origin: center center;`"
+                     class="max-w-full max-h-[70vh] object-contain shadow-lg rounded transition-transform duration-150"
+                     alt="Inspection Preview">
+            </div>
+        </div>
+    </div>
 </div>
+

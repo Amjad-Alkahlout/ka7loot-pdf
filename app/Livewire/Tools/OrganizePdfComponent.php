@@ -7,10 +7,12 @@ use App\Actions\File\SanitizeUploadedFileAction;
 use App\Enums\JobStatus;
 use App\Enums\ToolType;
 use App\Models\FileJob;
+use App\Services\Common\SortOrderValidator;
 use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfSplitService;
 use App\Services\Pdf\PdfThumbnailService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 class OrganizePdfComponent extends BaseToolComponent
@@ -29,13 +31,8 @@ class OrganizePdfComponent extends BaseToolComponent
      */
     public array $pages = [];
 
-    /**
-     * Base64 thumbnails indexed by original page number.
-     * @var array<int, string>
-     */
-    public array $thumbnails = [];
-
     public ?int $selectedPageId = null;
+
 
     public function updatedUpload(): void
     {
@@ -59,13 +56,9 @@ class OrganizePdfComponent extends BaseToolComponent
                 $this->pageCount = 1;
             }
 
-            // Generate thumbnails for each page
-            try {
-                $thumbService = app(PdfThumbnailService::class);
-                $this->thumbnails = $thumbService->generateThumbnails($realPath, maxPages: 50, scale: 220);
-            } catch (\Throwable $e) {
-                Log::warning("OrganizePdfComponent: Failed to generate thumbnails: " . $e->getMessage());
-                $this->thumbnails = [];
+            // Ensure isolated preview session id is established
+            if (! session()->has('preview_session_id')) {
+                session()->put('preview_session_id', session()->getId());
             }
 
             // Initialize page structure
@@ -82,6 +75,7 @@ class OrganizePdfComponent extends BaseToolComponent
             $this->jobStatus = 'uploaded';
         }
     }
+
 
     public function selectPage(int $pageId): void
     {
@@ -157,6 +151,64 @@ class OrganizePdfComponent extends BaseToolComponent
         $this->selectedPageId = null;
     }
 
+    /**
+     * Drag-and-drop reorder handler strictly validated via SortOrderValidator.
+     *
+     * @param array<string|int> $orderedIds
+     */
+    public function reorderPages(array $orderedIds): void
+    {
+        try {
+            $this->pages = SortOrderValidator::applyStrictOrder($this->pages, $orderedIds, 'id');
+        } catch (\InvalidArgumentException $e) {
+            Log::warning('OrganizePdfComponent: Reorder validation rejected: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Generate secure signed temporary preview URL for an uploaded PDF page.
+     */
+    public function getPreviewUrl(int $page, int $dpi = 120): string
+    {
+        if (! $this->upload) {
+            return '';
+        }
+
+        $sessionId = (string) (session()->get('preview_session_id') ?: session()->getId());
+        session()->put('preview_session_id', $sessionId);
+
+        return URL::temporarySignedRoute(
+            'tools.pdf-preview',
+            now()->addHour(),
+            [
+                'filename'   => $this->upload->getFilename(),
+                'page'       => $page,
+                'dpi'        => $dpi,
+                'session_id' => $sessionId,
+            ]
+        );
+    }
+
+    /**
+     * Generate higher-resolution signed URL for crisp inspection.
+     */
+    public function getHighResPreviewUrl(int $page): string
+    {
+        return $this->getPreviewUrl($page, 220);
+    }
+
+    public function cancelToolUpload(): void
+    {
+        parent::cancelToolUpload();
+        $this->filename = '';
+        $this->fileSizeBytes = 0;
+        $this->fileSizeFormatted = '';
+        $this->pageCount = 0;
+        $this->pages = [];
+        $this->selectedPageId = null;
+    }
+
+
     public function getActivePagesProperty(): array
     {
         return array_values(array_filter($this->pages, fn($p) => !$p['deleted']));
@@ -221,7 +273,7 @@ class OrganizePdfComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 

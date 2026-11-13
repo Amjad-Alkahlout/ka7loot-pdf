@@ -7,6 +7,7 @@ use App\Services\File\FileStorageManager;
 use App\Services\Pdf\PdfSplitService;
 use App\Services\Pdf\PdfThumbnailService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -135,11 +136,12 @@ class PdfPreviewController extends Controller
         }
 
         try {
-            $pageCount = $splitService->getPageCount($sourcePath);
+            $documentMetadata = $this->getCachedDocumentMetadata($sourcePath, $splitService);
         } catch (\Throwable) {
             abort(422, 'Could not read PDF document page count.');
         }
 
+        $pageCount = $documentMetadata['page_count'];
         if ($page > $pageCount) {
             abort(404, "Page {$page} is out of bounds (document has {$pageCount} pages).");
         }
@@ -155,7 +157,13 @@ class PdfPreviewController extends Controller
             @mkdir($cacheDir, 0755, true);
         }
 
-        $cachedFilePath = $thumbService->getCachedPreviewPath($sourcePath, $page, $dpi, $quality);
+        $cachedFilePath = $thumbService->getCachedPreviewPath(
+            $sourcePath,
+            $page,
+            $dpi,
+            $quality,
+            $documentMetadata['content_hash']
+        );
 
         if (! file_exists($cachedFilePath) || filesize($cachedFilePath) === 0) {
             $success = $thumbService->renderPageToFile($sourcePath, $cachedFilePath, $page, $dpi, $quality);
@@ -175,4 +183,82 @@ class PdfPreviewController extends Controller
             'X-Content-Type-Options' => 'nosniff',
         ]);
     }
+
+    /** Cache expensive PDF inspection by path and filesystem revision. */
+    private function getCachedDocumentMetadata(string $sourcePath, PdfSplitService $splitService): array
+    {
+        clearstatcache(true, $sourcePath);
+        $realPath = realpath($sourcePath) ?: $sourcePath;
+        $stat = @stat($sourcePath);
+        if ($stat === false) {
+            throw new \RuntimeException('Could not inspect PDF file metadata.');
+        }
+
+        $revision = implode(':', [
+            $realPath,
+            $stat['size'] ?? '',
+            $stat['mtime'] ?? '',
+            $stat['ctime'] ?? '',
+            $stat['ino'] ?? '',
+        ]);
+        $cacheKey = 'pdf-preview:document:' . hash('sha256', $revision);
+
+        return Cache::remember($cacheKey, now()->addHour(), function () use ($sourcePath, $splitService): array {
+            $contentHash = @hash_file('sha256', $sourcePath);
+
+            return [
+                'page_count' => $splitService->getPageCount($sourcePath),
+                'content_hash' => is_string($contentHash) ? $contentHash : '0',
+            ];
+        });
+    }
+
+    /**
+     * Serve a temporary, session-isolated signature image preview.
+     * Enforces signed URL verification, session isolation, filename sanitization,
+     * job directory boundary checks, and valid image headers.
+     */
+    public function showSignature(Request $request, FileStorageManager $storageManager): Response
+    {
+        if (! $request->hasValidSignature()) {
+            abort(403, 'Invalid or expired signature preview signature.');
+        }
+
+        $filename = (string) ($request->query('filename') ?? '');
+        $jobId = (string) ($request->query('job_id') ?? '');
+        $expectedSessionId = (string) ($request->query('session_id') ?? '');
+
+        if (! $filename || ! preg_match('/^[a-zA-Z0-9._-]+$/', $filename) || str_contains($filename, '..') || basename($filename) !== $filename) {
+            abort(400, 'Invalid filename format.');
+        }
+
+        if (! $jobId || ! preg_match('/^[a-f0-9\-]{36}$/i', $jobId)) {
+            abort(400, 'Invalid job ID format.');
+        }
+
+        $currentSessionId = session()->getId();
+        $storedSessionId = session()->get('preview_session_id');
+        if (empty($expectedSessionId) || ($expectedSessionId !== $currentSessionId && $expectedSessionId !== $storedSessionId)) {
+            abort(403, 'Unauthorized signature preview access.');
+        }
+
+        $jobDir = $storageManager->getJobDirectory($jobId);
+        $filePath = $jobDir . DIRECTORY_SEPARATOR . 'signatures' . DIRECTORY_SEPARATOR . $filename;
+
+        if (! file_exists($filePath) || ! is_file($filePath)) {
+            abort(404, 'Signature image not found.');
+        }
+
+        $info = @getimagesize($filePath);
+        if (! $info || ! in_array($info['mime'] ?? '', ['image/png', 'image/jpeg', 'image/webp'], true)) {
+            abort(400, 'Invalid signature image file.');
+        }
+
+        return response()->file($filePath, [
+            'Content-Type' => $info['mime'],
+            'Cache-Control' => 'private, max-age=3600',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
 }
+

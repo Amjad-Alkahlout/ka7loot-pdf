@@ -6,6 +6,7 @@ import { pdfDrawSignature, pdfPlacementItem } from './sign-pdf';
 import { pdfEditorPreview, computeEffectiveFontSize, isRtlText } from './edit-pdf';
 import { previewUrlManager, getPreviewUrl, revokePreviewUrl, revokeAllPreviewUrls, canPreviewLocally } from './preview-url-manager';
 import { registerSortableDirective } from './sortable-directive';
+import { pdfProgressivePreview, pdfInspectModal } from './pdf-progressive-preview';
 
 window.fileUploadHandler = fileUploadHandler;
 window.pdfDrawSignature = pdfDrawSignature;
@@ -18,6 +19,9 @@ window.getPreviewUrl = getPreviewUrl;
 window.revokePreviewUrl = revokePreviewUrl;
 window.revokeAllPreviewUrls = revokeAllPreviewUrls;
 window.canPreviewLocally = canPreviewLocally;
+window.pdfProgressivePreview = pdfProgressivePreview;
+window.pdfInspectModal = pdfInspectModal;
+
 
 const clerkConfig = window.clerkConfig || {};
 
@@ -209,7 +213,10 @@ const initAlpinePlugins = (Alpine) => {
     Alpine.data('pdfPlacementItem', pdfPlacementItem);
     Alpine.data('pdfEditorPreview', pdfEditorPreview);
     Alpine.data('previewUrlManager', previewUrlManager);
+    Alpine.data('pdfProgressivePreview', pdfProgressivePreview);
+    Alpine.data('pdfInspectModal', pdfInspectModal);
     registerSortableDirective(Alpine);
+
 };
 
 document.addEventListener('alpine:init', () => {

@@ -9,6 +9,7 @@ use App\Enums\PageOrientation;
 use App\Enums\PageSize;
 use App\Enums\ToolType;
 use App\Models\FileJob;
+use App\Services\Common\SortOrderValidator;
 use App\Services\File\FileStorageManager;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -205,6 +206,27 @@ class HeicToPdfComponent extends BaseToolComponent
         }
     }
 
+    /**
+     * Reorder uploads via SortableJS strictly validated via SortOrderValidator.
+     */
+    public function reorderFiles(array $orderedIds): void
+    {
+        try {
+            $this->uploads = SortOrderValidator::applyStrictOrder(
+                $this->uploads,
+                $orderedIds,
+                fn ($f) => is_object($f) && method_exists($f, 'getFilename') ? $f->getFilename() : ''
+            );
+        } catch (\InvalidArgumentException) {
+            // Safely reject incomplete or malformed reorder payloads
+        }
+    }
+
+    public function reorderUploads(array $orderedIds): void
+    {
+        $this->reorderFiles($orderedIds);
+    }
+
     public function process(
         SanitizeUploadedFileAction $sanitizer,
         FileStorageManager $storage,
@@ -255,7 +277,7 @@ class HeicToPdfComponent extends BaseToolComponent
             $this->pollJobStatus();
         } catch (\Throwable $e) {
             $this->jobStatus = 'failed';
-            $this->errorMessage = $e->getMessage();
+            $this->errorMessage = $this->reportToolFailure($e);
         }
     }
 
